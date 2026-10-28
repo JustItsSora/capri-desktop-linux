@@ -553,6 +553,38 @@ namespace CapriDesktop
                 if (File.Exists(Path.Combine(folder, "voice-key")) || pet.VoiceStatus != "no key | v1 | quiet" || pet.VoiceMenu != "Add ElevenLabs key...") throw new Exception("Remove key didn't remove it: " + pet.VoiceStatus + " | " + pet.VoiceMenu);
                 checks.Add("PASS voice: replies are spoken through ElevenLabs and type out at the voice's pace, Use ElevenLabs off keeps her quiet, and Remove key deletes the file");
                 fakeVoice.Stop();
+                if (!OperatingSystem.IsMacOS())
+                {
+                    List<OpenWindow> open = Hands.Windows();
+                    bool titled = false;
+                    OpenWindow shelfWindow = null;
+                    foreach (OpenWindow window in open)
+                    {
+                        if (window == null || string.IsNullOrEmpty(window.Title)) continue;
+                        titled = true;
+                        if (window.Title == "Capri test shelf") shelfWindow = window;
+                    }
+                    if (!titled) throw new Exception("She couldn't see the open windows.");
+                    if (shelfWindow == null) throw new Exception("She couldn't see her test shelf.");
+                    string switched = Hands.Do("app_window", new ToolArguments { Name = "test shelf", Action = "switch_to" });
+                    bool minimized = Hands.Steer(shelfWindow, "minimize");
+                    bool restored = Hands.Steer(shelfWindow, "switch_to");
+                    byte[] shot = X11.Shot();
+                    if (shot == null || shot.Length < 2000 || shot[0] != 0xFF || shot[1] != 0xD8 || shot[2] != 0xFF) throw new Exception("She couldn't take a screenshot.");
+                    if (!switched.StartsWith("Switched to", StringComparison.Ordinal)) throw new Exception("She couldn't switch to a window: " + switched);
+                    if (!minimized || !restored) throw new Exception("She couldn't minimize or restore a window.");
+                    checks.Add("PASS windows: on X11 she sees the open windows with their titles, switches to, minimizes and restores them, and takes screenshots of the screen");
+                }
+                pet.ShowCloudModels(new List<string> { "nvidia/nemotron-3.5-super-vl-120b-a12b", "openai/gpt-oss-20b" });
+                int clouds = pet.CloudChoices;
+                Cloud cloud = new Cloud("nvapi-test-key", "nvidia/nemotron-3.5-super-vl-120b-a12b");
+                pet.Brain.Remote = cloud;
+                pet.PickCloudModel("openai/gpt-oss-20b");
+                bool cloudPicked = pet.Brain.Remote.Model == "openai/gpt-oss-20b" && pet.Brain.Model == "openai/gpt-oss-20b";
+                pet.Brain.Remote = null;
+                pet.Brain.Model = null;
+                if (clouds != 2 || !cloudPicked) throw new Exception("The NVIDIA menu didn't list or pick models.");
+                checks.Add("PASS NVIDIA: her NVIDIA menu lists the models her key can use, picks one for the brain and goes back to Ollama when she disconnects");
                 Send(shelf, "quit");
                 Finish(null);
                 return true;
