@@ -90,7 +90,29 @@ namespace CapriDesktop
             Hands.Press = delegate(byte key) { Key(key, OnMac); };
             Hands.Catalog = delegate { return OnMac ? MacApps(MacFolders()) : LinuxApps(LinuxFolders()); };
             Hands.NowPlaying = delegate { return Song(OnMac); };
-            Hands.Windows = delegate { return new List<OpenWindow>(); };
+            Hands.Windows = delegate { return OnMac ? new List<OpenWindow>() : X11.List(); };
+            Hands.Steer = delegate(OpenWindow window, string action)
+            {
+                if (OnMac || window == null) return false;
+                long id = window.Handle.ToInt64();
+                if (action == "switch_to") return X11.Activate(id);
+                if (action == "minimize") return X11.Minimize(id);
+                if (action == "close") return X11.Close(id);
+                if (action == "close_tab") return X11.CloseTab(id);
+                return false;
+            };
+            Hands.Look = delegate(string focus)
+            {
+                if (OnMac) return "You can't see their screen right now.";
+                byte[] shot = X11.Shot();
+                if (shot == null) return "I couldn't see your screen right now.";
+                try
+                {
+                    string seen = brain.See(shot, "You describe screenshots accurately and briefly.", "Describe what's on this screen in two or three plain sentences: what kind of game or app it is (name it only if the name is on screen), what's happening, and any text or numbers that matter. Don't guess who a person is from their face; name someone only if their name is written on screen." + (string.IsNullOrWhiteSpace(focus) ? "" : " Pay attention to: " + focus.Trim()), 160);
+                    return string.IsNullOrEmpty(seen) ? "You looked but couldn't make out their screen." : "You looked at their screen. You see: " + seen;
+                }
+                catch (BrainException error) { return error.Message; }
+            };
             Hands.Chord = delegate { throw new PlatformNotSupportedException("keyboard shortcuts only work on Windows for now"); };
             brain.Act = Hands.Do;
         }
