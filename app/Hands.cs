@@ -163,6 +163,11 @@ namespace CapriDesktop
         internal static Func<string, string> Hush = delegate(string text) { return text; };
         internal static Action<byte[]> Chord = PressChord;
         internal static Func<string, int, bool> Power = Switch;
+        // The cross-platform builds bring their own shortcuts, clipboard and reminders; Windows keeps its own.
+        internal static Func<string, string> Grab;
+        internal static Func<string, string, string> Clip;
+        internal static Func<string, string, string, string> Remind;
+        internal static bool Extra;
         private static readonly string[] Browsers = { "chrome", "msedge", "firefox", "brave", "opera", "vivaldi" };
         private static readonly string[] Shell = { "Progman", "WorkerW", "Shell_TrayWnd", "Shell_SecondaryTrayWnd" };
         private delegate bool Visit(IntPtr window, IntPtr data);
