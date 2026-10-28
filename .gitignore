@@ -1,4 +1,17 @@
+# Build output
+bin/
+obj/
 out/
-cross/bin/
-cross/obj/
-node_modules/
+*.user
+
+# Local secrets - never commit these
+cloud-key
+voice-key
+*.key
+.env
+
+# Local builds and backups
+backups/
+*.tar.gz
+Capri/Capri
+Capri/Capri.*

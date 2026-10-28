@@ -1,3 +1,20 @@
+> ## ⚠️ This repository is a community fork: **Capri Linux Enhanced**
+>
+> Capri was created by **[Lachy](https://github.com/lachydotmcg)** — this project is
+> **not** his, and all credit for the original desktop companion, her personality,
+> her voice and her whole design goes to him and to the
+> [upstream project](https://github.com/lachydotmcg/capri-desktop).
+> This fork is a community effort to make the **Linux and Mac** versions of Capri
+> actually useful: a real window manager, cloud brains, and a single-file Linux build.
+>
+> - **Upstream (original):** https://github.com/lachydotmcg/capri-desktop
+> - **This fork:** https://github.com/kyuog/capri-desktop-linux
+> - **What this fork adds on Linux:** [ENHANCEMENTS.md](ENHANCEMENTS.md)
+> - **License:** unchanged, [PolyForm Noncommercial 1.0.0](LICENSE.md), with the
+>   author's Required Notice preserved. Noncommercial use only.
+
+---
+
 <p align="center">
   <img src="assets/chip-source.png" alt="Chip" width="40%" align="middle">
   <img src="assets/capri.png" alt="Capri" width="40%" align="middle">
