@@ -1454,7 +1454,7 @@ namespace CapriDesktop
                     throw new WebException("The reply took too long.", error, WebExceptionStatus.Timeout, null);
                 }
                 WebException web = error as WebException;
-                if (web != null && web.Status != WebExceptionStatus.RequestCanceled) Log(url, took.ElapsedMilliseconds, web.Status.ToString());
+                if (web != null && web.Status != WebExceptionStatus.RequestCanceled) Log(url, took.ElapsedMilliseconds, web.Status + ": " + error.Message + (error.InnerException == null ? "" : " / " + error.InnerException.Message));
                 throw;
             }
             finally { lock (gate) active.Remove(request); }
