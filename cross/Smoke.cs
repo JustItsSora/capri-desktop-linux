@@ -239,7 +239,7 @@ namespace CapriDesktop
                     string linuxSong = Limbs.Song(false);
                     string log = string.Join(" / ", did);
                     if (opened != "Opened Spotify." || !log.Contains("launch /bin/sh -c spotify") || searched != "Searched youtube.com for lofi beats." || !log.Contains((OperatingSystem.IsMacOS() ? "launch open " : "launch xdg-open ") + "https://www.youtube.com/results?search_query=lofi%20beats")) throw new Exception("Opening apps or sites went wrong: " + opened + " / " + searched + " / " + log);
-                    if (skipped != "Skipped to the next track." || !log.Contains(OperatingSystem.IsMacOS() ? "osascript -e tell application \"Spotify\" to next track" : "--dest=org.mpris.MediaPlayer2.spotify /org/mpris/MediaPlayer2 org.mpris.MediaPlayer2.Player.Next") || !snipped.Contains("only work on Windows")) throw new Exception("Media keys or shortcuts went wrong: " + skipped + " / " + snipped + " / " + log);
+                    if (skipped != "Skipped to the next track." || !log.Contains(OperatingSystem.IsMacOS() ? "osascript -e tell application \"Spotify\" to next track" : "--dest=org.mpris.MediaPlayer2.spotify /org/mpris/MediaPlayer2 org.mpris.MediaPlayer2.Player.Next") || (OperatingSystem.IsMacOS() ? !snipped.Contains("only work on Windows") : !snipped.Contains("screenshot", StringComparison.OrdinalIgnoreCase))) throw new Exception("Media keys or shortcuts went wrong: " + skipped + " / " + snipped + " / " + log);
                     if (!log.Contains("osascript -e tell application \"Spotify\" to next track") || !log.Contains("+ 2)") || !log.Contains("pactl set-sink-mute @DEFAULT_SINK@ toggle / amixer -q sset Master toggle")) throw new Exception("Mac or Linux media keys went wrong: " + log);
                     if (!log.Contains("play track \"spotify:track:2iyaHQlYrR8Eyr4wOmOT5D\"") || !log.Contains("OpenUri string:spotify:track:2iyaHQlYrR8Eyr4wOmOT5D") || log.Contains("launch open spotify:") || log.Contains("launch xdg-open spotify:")) throw new Exception("Spotify tracks didn't play directly: " + log);
                     if (macSong != "Petite Meller - In Love With Myself" || linuxSong != "Chase Atlantic - Consume") throw new Exception("Now playing was read wrong: " + macSong + " / " + linuxSong);
@@ -585,6 +585,26 @@ namespace CapriDesktop
                 pet.Brain.Model = null;
                 if (clouds != 2 || !cloudPicked) throw new Exception("The NVIDIA menu didn't list or pick models.");
                 checks.Add("PASS NVIDIA: her NVIDIA menu lists the models her key can use, picks one for the brain and goes back to Ollama when she disconnects");
+                if (!OperatingSystem.IsMacOS())
+                {
+                    string listed = Hands.Tools;
+                    bool hasClipboard = listed.Contains("\"clipboard\"") && listed.Contains("\"remind\"");
+                    string copied = Hands.Do("clipboard", new ToolArguments { Action = "write", Text = "capri smoke test" });
+                    string read = Hands.Do("clipboard", new ToolArguments { Action = "read" });
+                    if (!copied.StartsWith("Copied it", StringComparison.Ordinal) || !read.Contains("capri smoke test", StringComparison.Ordinal)) throw new Exception("The clipboard went wrong: " + copied + " / " + read);
+                    string reminded = Hands.Do("remind", new ToolArguments { Text = "smoke test" });
+                    string later = Hands.Do("remind", new ToolArguments { Text = "smoke test", Minutes = "5" });
+                    if (!reminded.StartsWith("Told you", StringComparison.Ordinal) || !later.Contains("5 minutes", StringComparison.Ordinal)) throw new Exception("Reminders went wrong: " + reminded + " / " + later);
+                    string gameBar = Hands.Do("shortcut", new ToolArguments { Name = "game_bar" });
+                    string emoji = Hands.Do("shortcut", new ToolArguments { Name = "emoji" });
+                    string nothing = Hands.Do("power", new ToolArguments { Action = "cancel" });
+                    string job = Hands.Do("use_computer", new ToolArguments { Task = "test" });
+                    if (!gameBar.Contains("Game Bar", StringComparison.Ordinal) || !emoji.Contains("emoji", StringComparison.Ordinal)) throw new Exception("The shortcuts went wrong: " + gameBar + " / " + emoji);
+                    if (!nothing.Contains("nothing was shutting down", StringComparison.OrdinalIgnoreCase)) throw new Exception("Cancelling a shutdown went wrong: " + nothing);
+                    if (!job.StartsWith("My brain", StringComparison.Ordinal)) throw new Exception("Her hands went wrong: " + job);
+                    if (!hasClipboard) throw new Exception("Her tools don't include the clipboard or reminders.");
+                    checks.Add("PASS tools: on Linux she reads and writes the clipboard, sets reminders, answers the shortcuts the desktop actually has, says what it cannot do, and cancels a shutdown that was never going to happen");
+                }
                 Send(shelf, "quit");
                 Finish(null);
                 return true;

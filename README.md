@@ -5,7 +5,9 @@
 > her voice and her whole design goes to him and to the
 > [upstream project](https://github.com/lachydotmcg/capri-desktop).
 > This fork is a community effort to make the **Linux and Mac** versions of Capri
-> actually useful: a real window manager, cloud brains, and a single-file Linux build.
+> actually useful: a real window manager, hands that use the mouse and keyboard,
+> shortcuts that match your desktop, clipboard and reminders, cloud brains, and a
+> single-file Linux build.
 >
 > - **Upstream (original):** https://github.com/lachydotmcg/capri-desktop
 > - **This fork:** https://github.com/kyuog/capri-desktop-linux
@@ -86,16 +88,22 @@ Windows or your antivirus may warn you because it's a new app. All the code is h
 
 ## Mac and Linux (early preview)
 
-She sits on your windows and chats, talks with an ElevenLabs key, opens apps and controls your music. The Mainframe, voice chat and jobs with her own cursor are Windows-only for now.
+She sits on your windows and chats, talks with an ElevenLabs key, opens apps and controls your music. The Mainframe and voice chat are Windows-only for now. **This fork adds a lot on Linux**: she sees and controls your windows, uses the mouse and keyboard, takes screenshots, reads and writes your clipboard, sets reminders, has working shortcuts, and can shut your PC down.
 
 1. Download [Mac (Apple Silicon)](https://github.com/lachydotmcg/capri-desktop/releases/latest/download/Capri-mac-apple-silicon.zip), [Mac (Intel)](https://github.com/lachydotmcg/capri-desktop/releases/latest/download/Capri-mac-intel.zip) or [Linux](https://github.com/lachydotmcg/capri-desktop/releases/latest/download/Capri-linux-x64.tar.gz)
-2. Install [Ollama](https://ollama.com), then run `ollama pull gemma4:e4b` for her brain
+2. Install [Ollama](https://ollama.com), then run `ollama pull gemma4:e4b` for her brain — or right-click her and paste an NVIDIA key to put her brain in the cloud, no local model needed
 3. **Mac:** unzip it, drag Capri into Applications, then open Terminal and run this once. Needs macOS 15 or newer
    ```bash
    xattr -dr com.apple.quarantine /Applications/Capri.app
    ```
    Apple hasn't approved (notarized) her yet, so macOS blocks her or calls her "damaged" until you do. That line only clears the downloaded-from-the-internet flag on Capri
-4. **Linux:** unpack it and run `Capri/Capri`. She sits on windows on X11; on Wayland she sits on the bottom of your screen
+4. **Linux:** unpack it and run `Capri/Capri`. She sits on windows on X11; on Wayland she sits on the bottom of your screen. `xdotool`, `xclip` and ImageMagick's `import` let her use the mouse, the keyboard, the clipboard and take screenshots; `ffmpeg` and `xfce4-screenshooter` let her record and screenshot
+
+Try her hands from a terminal:
+
+```bash
+Capri/Capri --hands "tell me what app is open on the screen"
+```
 
 ## How to use her
 

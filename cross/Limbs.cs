@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Net;
 using System.IO;
 using System.Text.RegularExpressions;
 using System.Threading;
@@ -108,11 +109,21 @@ namespace CapriDesktop
                 if (shot == null) return "I couldn't see your screen right now.";
                 try
                 {
-                    string seen = brain.See(shot, "You describe screenshots accurately and briefly.", "Describe what's on this screen in two or three plain sentences: what kind of game or app it is (name it only if the name is on screen), what's happening, and any text or numbers that matter. Don't guess who a person is from their face; name someone only if their name is written on screen." + (string.IsNullOrWhiteSpace(focus) ? "" : " Pay attention to: " + focus.Trim()), 160);
+                    string seen = Linux.Eyes(brain, shot, "You describe screenshots accurately and briefly.", "Describe what's on this screen in two or three plain sentences: what kind of game or app it is (name it only if the name is on screen), what's happening, and any text or numbers that matter. Don't guess who a person is from their face; name someone only if their name is written on screen." + (string.IsNullOrWhiteSpace(focus) ? "" : " Pay attention to: " + focus.Trim()), 160);
                     return string.IsNullOrEmpty(seen) ? "You looked but couldn't make out their screen." : "You looked at their screen. You see: " + seen;
                 }
                 catch (BrainException error) { return error.Message; }
+                catch (WebException error) { return "Your eyes took too long: " + error.Message; }
             };
+            if (!OnMac)
+            {
+                Hands.OwnTools();
+                Hands.Grab = Linux.Shortcut;
+                Hands.Clip = Linux.Clip;
+                Hands.Remind = Linux.Remind;
+                Hands.Power = Linux.Power;
+                Hands.Work = delegate(string task, string asked) { return Linux.Work(task, asked, brain); };
+            }
             Hands.Chord = delegate { throw new PlatformNotSupportedException("keyboard shortcuts only work on Windows for now"); };
             brain.Act = Hands.Do;
         }

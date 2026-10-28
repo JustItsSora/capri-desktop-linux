@@ -37,10 +37,66 @@ Upstream, the `look_at_screen` tool was Windows-only. On Linux she now takes a
 real screenshot of the root window with ImageMagick's `import`, sends it as a
 JPEG and asks a **vision-capable** model what is on it.
 
-Pick a model that can see, such as `meta/llama-3.2-11b-vision-instruct` from
-the NVIDIA menu, or any multimodal Ollama model.
+You do not have to pick a vision model yourself: when her brain is a text-only
+one, she borrows `meta/llama-3.2-11b-vision-instruct` for the look and gives
+it back afterwards. Any multimodal Ollama model works too.
 
-## 3. She can use a cloud brain (NVIDIA, OpenAI, Claude, DeepSeek)
+## 3. She has hands: mouse and keyboard on Linux
+
+The `use_computer` tool was a stub outside Windows. On Linux she now really
+drives the desktop, in two steps:
+
+1. her text brain plans **one small step at a time** — `LOOK`, `CLICK`, `TYPE`,
+   `KEY`, `SCROLL`, `WAIT`, `SAY` or `DONE`;
+2. her eyes find the pixels, and `xdotool` does the moving and the typing.
+
+Clicks first look for a window with that name (`xdotool search --name`), which
+is exact; only when there is no such window does she ask a vision model where
+the thing is, and it answers with a position from 0 to 1 that she turns into
+pixels.
+
+She stops when she is stuck, when the same step repeats, or after a dozen
+steps, and she tells you what she got through.
+
+You can also give her a job from a terminal, which is handy while you are
+using the mouse yourself:
+
+```bash
+out/linux/Capri --hands "tell me what app is open on the screen"
+```
+
+## 4. Shortcuts that work on your desktop
+
+Upstream, every shortcut but the Discord ones said "that only works on
+Windows". On Linux she now does the ones your desktop actually has:
+
+| Shortcut | What she does |
+| --- | --- |
+| screenshot | a full-screen shot with `xfce4-screenshooter`, saved in your Pictures folder |
+| show desktop | `super+d` |
+| task manager | `xfce4-appfinder`, or `htop` in a terminal |
+| clipboard | reads your clipboard and shows it |
+| record | records the screen with `ffmpeg` |
+| clip that | saves the last 30 seconds of that recording to your Videos folder |
+| discord mute / deafen | the same Discord shortcuts as on Windows |
+| game bar / emoji | she says plainly that your desktop has neither |
+
+## 5. Clipboard and reminders
+
+Two more tools, only on Linux and Mac, so her brain does not have to guess:
+
+- **clipboard** — read what you copied, or put text there for you to paste
+- **remind** — a notification now, or a notification later, with
+  `notify-send`
+
+## 6. Power on Linux
+
+The `power` tool was Windows-only too. On Linux she can shut down, restart,
+sleep, lock, sign out, or cancel a shutdown she set up, using `systemctl`,
+`loginctl` and `xfce4-session-logout`. A countdown works as it does on
+Windows.
+
+## 7. She can use a cloud brain (NVIDIA, OpenAI, Claude, DeepSeek)
 
 Upstream, the whole cloud-brain setup lived behind the Windows-only Mainframe,
 which left Linux and Mac users with Ollama as the only option — including a
@@ -60,7 +116,7 @@ A 4B NVIDIA model answers in under a second, where a 120B one takes longer than
 her patience, so the default here is the fast one and the big ones are one
 click away.
 
-## 4. A single-file Linux build that fits in your pocket
+## 8. A single-file Linux build that fits in your pocket
 
 Upstream ships a ~103 MB Linux binary. This fork publishes a **56 MB** single
 file with the .NET runtime and Avalonia's native libraries embedded:
@@ -75,15 +131,18 @@ dotnet publish cross/Capri.Cross.csproj -c Release -r linux-x64 \
 The GC heap is also capped at 2 GB so she stays a good neighbour on small
 machines (`cross/runtimeconfig.template.json`).
 
-## 5. Tests
+## 9. Tests
 
 The upstream smoke test suite covers the cross-platform build. This fork adds
-two cases to it:
+three cases to it:
 
 - **windows** — she sees the open windows with their titles, switches to,
   minimizes and restores them, and takes screenshots
 - **NVIDIA** — her NVIDIA menu lists the models a key can use, picks one for
   the brain, and goes back to Ollama when she disconnects
+- **tools** — she reads and writes the clipboard, sets reminders, answers the
+  shortcuts the desktop actually has, says what it cannot do, and cancels a
+  shutdown that was never going to happen
 
 Run them with:
 

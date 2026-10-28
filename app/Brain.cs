@@ -839,6 +839,19 @@ namespace CapriDesktop
             return raw;
         }
 
+        internal string Say(string system, string instruction, int limit)
+        {
+            int ticket;
+            lock (gate) ticket = cancelled;
+            string model = Model;
+            if (model == null) throw new BrainException(Offline);
+            Cloud remote = Remote;
+            if (remote != null && remote.Kind == "deepseek") throw new BrainException(Blind);
+            List<ChatMessage> messages = new List<ChatMessage> { new ChatMessage("system", system), new ChatMessage("user", instruction) };
+            string raw = Think(model, messages, false, new List<KeyValuePair<string, ToolArguments>>(), null, limit, ticket, false, null, null, Math.Max(64, limit));
+            return Regex.Replace(Visible(raw), @"\s+", " ").Trim();
+        }
+
         internal string See(byte[] jpeg, string system, string instruction, int limit)
         {
             int ticket;
@@ -855,7 +868,7 @@ namespace CapriDesktop
             if (parts == null) asked.Images = new[] { data };
             List<ChatMessage> messages = new List<ChatMessage> { new ChatMessage("system", system), asked };
             string raw;
-            try { raw = Think(model, messages, false, new List<KeyValuePair<string, ToolArguments>>(), parts, limit, ticket); }
+            try { raw = Think(model, messages, false, new List<KeyValuePair<string, ToolArguments>>(), parts, limit, ticket, false, null, null, Math.Max(64, limit)); }
             catch (BrainException error)
             {
                 if (remote == null || !Regex.IsMatch(error.Message, "multimodal|image|vision", RegexOptions.IgnoreCase)) throw;
@@ -897,7 +910,7 @@ namespace CapriDesktop
             return Think(model, messages, false, calls, null, 400, ticket);
         }
 
-        private string Think(string model, List<ChatMessage> messages, bool tools, List<KeyValuePair<string, ToolArguments>> calls, string parts = null, int limit = 90, int ticket = -1, bool routing = false, string openAiTools = null, string claudeTools = null)
+        private string Think(string model, List<ChatMessage> messages, bool tools, List<KeyValuePair<string, ToolArguments>> calls, string parts = null, int limit = 90, int ticket = -1, bool routing = false, string openAiTools = null, string claudeTools = null, int tokens = 0)
         {
             Check(ticket);
             Cloud remote = Remote;
@@ -913,7 +926,7 @@ namespace CapriDesktop
                     Model = remote.Model,
                     Messages = messages.ToArray(),
                     Limit = openAi ? 2000 : (int?)null,
-                    Tokens = openAi ? (int?)null : brief ? Math.Max(256, limit) : 2000,
+                    Tokens = openAi ? (int?)null : tokens > 0 ? tokens : brief ? Math.Max(256, limit) : 2000,
                     Effort = effort,
                     Thinking = remote.Kind == "deepseek" ? new CloudThinking() : null,
                     Template = brief ? new CloudTemplate() : null

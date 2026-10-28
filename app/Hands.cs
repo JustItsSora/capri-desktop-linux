@@ -120,8 +120,19 @@ namespace CapriDesktop
               "{\"type\":\"object\",\"properties\":{\"action\":{\"type\":\"string\",\"description\":\"What to do\",\"enum\":[\"shut_down\",\"restart\",\"sleep\",\"lock\",\"sign_out\",\"cancel\"]},\"minutes\":{\"type\":\"string\",\"description\":\"How many minutes from now, only if they said when\"}},\"required\":[\"action\"]}" }
         };
 
-        internal static readonly string Tools = Render(false);
-        internal static readonly string ClaudeTools = Render(true);
+        // Tools the cross-platform builds bring of their own. Windows has its own way of doing these.
+        private static readonly string[,] ExtraSpecs =
+        {
+            { "clipboard", "Read or write what's on their clipboard: what they copied, or put some text there for them to paste. Use it when they ask what they copied, or ask you to copy something.",
+              "{\"type\":\"object\",\"properties\":{\"action\":{\"type\":\"string\",\"description\":\"What to do\",\"enum\":[\"read\",\"write\"]},\"text\":{\"type\":\"string\",\"description\":\"The text to copy, when writing\"}},\"required\":[\"action\"]}" },
+            { "remind", "Show them a notification right now, or set a reminder that pops up later on their screen. Use it when they ask to be reminded, to get a notification, or to be told something in a while.",
+              "{\"type\":\"object\",\"properties\":{\"text\":{\"type\":\"string\",\"description\":\"What to remind them about, in a few plain words\"},\"minutes\":{\"type\":\"string\",\"description\":\"How many minutes from now, only if they said when\"}},\"required\":[\"text\"]}" }
+        };
+
+        private static string tools;
+        private static string claudeTools;
+        internal static string Tools { get { if (tools == null) tools = Render(false); return tools; } }
+        internal static string ClaudeTools { get { if (claudeTools == null) claudeTools = Render(true); return claudeTools; } }
         internal static readonly string Listing = Written();
         private const string LookupWords = @"^(what('?s| is| are)|how('?s| is)|is it|will it|when('?s| is| does| do)|who won|did|check|get|tell me|show me|find)\b.*\b(weather|forecast|temperature|raining|snowing|news|headlines|scores?|stock price|price of|exchange rate|time (is it )?in|opening hours|open (today|now|tonight)|release date|showtimes|rain|snow|sunny|hot out|cold out)\b|^(weather|forecast|news|headlines)\b|^who (won|is winning)\b";
 
@@ -217,6 +228,8 @@ namespace CapriDesktop
                 if (tool == "shortcut") return Shortcut(args.Name);
                 if (tool == "remember") return args.Action == "forget" ? Brain.Unnote(Theirs(args.Text)) : CallMe(args.Text) ?? Brain.Note(Theirs(args.Text));
                 if (tool == "power") return Turn(args.Action, args.Minutes);
+                if (tool == "clipboard") return Clip == null ? "The clipboard isn't ready on this PC yet." : Clip(args.Action, args.Text);
+                if (tool == "remind") return Remind == null ? "Reminders aren't ready on this PC yet." : Remind(args.Text, args.Minutes, args.App);
                 return "There's no tool called " + tool + ".";
             }
             catch (Exception error) { return "That didn't work: " + error.Message; }
@@ -267,8 +280,21 @@ namespace CapriDesktop
             for (int i = 0; i < Specs.GetLength(0); i++)
                 tools.Add(claude
                     ? "{\"name\":\"" + Specs[i, 0] + "\",\"description\":" + Voice.Quote(Specs[i, 1]) + ",\"input_schema\":" + Specs[i, 2] + "}"
-                    : "{\"type\":\"function\",\"function\":{\"name\":\"" + Specs[i, 0] + "\",\"description\":" + Voice.Quote(Specs[i, 1]) + ",\"parameters\":" + Specs[i, 2] + "}}");
+                    : "{\"type\":\"function\",\"function\":{\"name\":\"" + Specs[i, 0] + "\",\"description\":" + Voice.Quote(Specs[i, 1]) + ",\"parameters\":" + Specs[i, 2] + "}}}");
+            if (Extra)
+                for (int i = 0; i < ExtraSpecs.GetLength(0); i++)
+                    tools.Add(claude
+                        ? "{\"name\":\"" + ExtraSpecs[i, 0] + "\",\"description\":" + Voice.Quote(ExtraSpecs[i, 1]) + ",\"input_schema\":" + ExtraSpecs[i, 2] + "}"
+                        : "{\"type\":\"function\",\"function\":{\"name\":\"" + ExtraSpecs[i, 0] + "\",\"description\":" + Voice.Quote(ExtraSpecs[i, 1]) + ",\"parameters\":" + ExtraSpecs[i, 2] + "}}}");
             return "[" + string.Join(",", tools.ToArray()) + "]";
+        }
+
+        // The cross-platform builds turn their own tools on, so the list of tools is rendered again.
+        internal static void OwnTools()
+        {
+            Extra = true;
+            tools = null;
+            claudeTools = null;
         }
 
         private static string Written()
@@ -1036,6 +1062,7 @@ namespace CapriDesktop
 
         private static string Shortcut(string name)
         {
+            if (Grab != null) return Grab(name);
             int row = -1;
             for (int i = 0; i < Shortcuts.GetLength(0); i++) if (Shortcuts[i, 0] == name) row = i;
             if (row < 0) return "There's no shortcut called " + name + ".";

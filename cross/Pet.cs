@@ -1151,7 +1151,7 @@ namespace CapriDesktop
         }
 
         internal const string FastCloud = "nvidia/nemotron-3.5-bolt-e4b";
-        internal const string SeeingCloud = "meta/llama-3.2-11b-vision-instruct";
+        internal const string SeeingCloud = "meta/llama-3.2-90b-vision-instruct";
 
         internal void DisconnectCloud()
         {
