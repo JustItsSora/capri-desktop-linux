@@ -10,6 +10,7 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Input;
+using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Media.Imaging;
 using Avalonia.Platform;
@@ -25,6 +26,7 @@ namespace CapriDesktop
         [DataMember] internal bool Placed;
         [DataMember] internal double Size = 240;
         [DataMember] internal string Model;
+        [DataMember] internal string CloudModel;
         [DataMember] internal string Language;
         [DataMember] internal string Nickname;
         [DataMember] internal int Replies;
@@ -122,6 +124,13 @@ namespace CapriDesktop
         private static readonly string[] SoundNames = { "Off", "Quiet", "Normal", "Loud" };
         private static readonly int[] SoundLevels = { 0, 30, 60, 100 };
         internal const string Offline = "My brain's offline. Install Ollama from ollama.com, then run: ollama pull gemma4:e4b";
+
+        private string BrainDown()
+        {
+            if (Brain.Remote != null) return "My NVIDIA key isn't answering right now. Wait a moment and ask me again, or pick another model in my right-click menu under NVIDIA.";
+            if (ReadCloudKey() != null) return "My NVIDIA key isn't working. Right-click me and paste it again under NVIDIA.";
+            return Offline;
+        }
         internal const string DiscordPage = "https://discord.gg/F4fDHfGtFk";
         internal static readonly double[] Sizes = { 140, 170, 240, 320, 440, 560 };
         private static readonly string[] SizeNames = { "Tiny", "Small", "Medium", "Large", "Huge", "Giant" };
@@ -165,6 +174,7 @@ namespace CapriDesktop
         private MenuItem danceItem;
         private MenuItem musicItem;
         private MenuItem brainMenu;
+        private MenuItem cloudMenu;
         internal Func<bool> MusicPlaying = Music.Playing;
         private bool musicOn;
         private bool musicBusy;
@@ -276,6 +286,7 @@ namespace CapriDesktop
                 catch (Exception error) { Lose(error); }
                 Place();
                 frames.Start();
+                if (ReadCloudKey() != null) ConnectCloud(false);
                 FindBrain();
                 if (Program.Smoke != null) smoke = new Smoke(this, Program.Smoke);
                 else
@@ -848,6 +859,12 @@ namespace CapriDesktop
             move.Items.Add(danceItem);
             brainMenu = new MenuItem { Header = "Brain" };
             brainMenu.Items.Add(new MenuItem { Header = "Looking for models...", IsEnabled = false });
+            cloudMenu = new MenuItem { Header = "NVIDIA" };
+            cloudMenu.Items.Add(new MenuItem { Header = "Not connected. Paste a key to use NVIDIA instead of Ollama.", IsEnabled = false });
+            MenuItem cloudKey = new MenuItem { Header = "Paste an NVIDIA API key..." };
+            cloudKey.Click += delegate { AskCloudKey(); };
+            MenuItem cloudOff = new MenuItem { Header = "Go back to Ollama" };
+            cloudOff.Click += delegate { DisconnectCloud(); };
             MenuItem settings = new MenuItem { Header = "Settings" };
             MenuItem language = new MenuItem { Header = "Language" };
             for (int i = 0; i < Brain.Languages.GetLength(0); i++)
@@ -920,6 +937,9 @@ namespace CapriDesktop
             menu.Items.Add(move);
             menu.Items.Add(sizes);
             menu.Items.Add(brainMenu);
+            menu.Items.Add(cloudMenu);
+            menu.Items.Add(cloudKey);
+            menu.Items.Add(cloudOff);
             menu.Items.Add(settings);
             menu.Items.Add(discord);
             menu.Items.Add(new Separator());
@@ -1070,6 +1090,8 @@ namespace CapriDesktop
 
         internal int BrainChoices { get { return brainMenu.Items.Count; } }
 
+        internal int CloudChoices { get { return cloudMenu == null ? 0 : cloudMenu.Items.Count; } }
+
         internal void PickBrain(string model)
         {
             if (string.IsNullOrEmpty(model) || model == Brain.Model) return;
@@ -1078,6 +1100,154 @@ namespace CapriDesktop
             Brain.Forget();
             Saved.Model = model;
             Save();
+        }
+
+        private string CloudFile { get { return Path.Combine(Program.Smoke ?? folder, "cloud-key"); } }
+
+        private string ReadCloudKey()
+        {
+            try
+            {
+                string key = File.ReadAllText(CloudFile).Trim();
+                return key.Length == 0 ? null : key;
+            }
+            catch (Exception) { return null; }
+        }
+
+        private void WriteCloudKey(string key)
+        {
+            try
+            {
+                if (key == null) { File.Delete(CloudFile); return; }
+                Directory.CreateDirectory(Path.GetDirectoryName(CloudFile));
+                FileStreamOptions options = new FileStreamOptions { Mode = FileMode.Create, Access = FileAccess.Write };
+                if (!OperatingSystem.IsWindows()) options.UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
+                using (FileStream stream = new FileStream(CloudFile, options))
+                {
+                    byte[] bytes = System.Text.Encoding.UTF8.GetBytes(key);
+                    stream.Write(bytes, 0, bytes.Length);
+                }
+            }
+            catch (Exception) { }
+        }
+
+        internal void ConnectCloud(bool announce)
+        {
+            string key = ReadCloudKey();
+            if (key == null || !key.StartsWith("nvapi-", StringComparison.Ordinal))
+            {
+                if (announce) Reply(++asking, "nvidia", "That key doesn't look like an NVIDIA one. It starts with nvapi-.");
+                return;
+            }
+            Brain.Cancel();
+            string model = string.IsNullOrEmpty(Saved.CloudModel) ? FastCloud : Saved.CloudModel;
+            Cloud cloud = new Cloud(key, model);
+            Brain.Remote = cloud;
+            Brain.Model = cloud.Model;
+            Brain.CloudWait = 75000;
+            Brain.Forget();
+            if (announce) Reply(++asking, "nvidia", "I'm on NVIDIA now. My brain is " + cloud.Model + ".");
+            LoadCloudModels(key);
+        }
+
+        internal const string FastCloud = "nvidia/nemotron-3.5-bolt-e4b";
+        internal const string SeeingCloud = "meta/llama-3.2-11b-vision-instruct";
+
+        internal void DisconnectCloud()
+        {
+            WriteCloudKey(null);
+            Brain.Cancel();
+            Brain.Remote = null;
+            Brain.Model = null;
+            Brain.Forget();
+            if (cloudMenu != null) cloudMenu.Items.Clear();
+            if (cloudMenu != null) cloudMenu.Items.Add(new MenuItem { Header = "Not connected. Paste a key to use NVIDIA instead of Ollama.", IsEnabled = false });
+            FindBrain();
+            Reply(++asking, "nvidia", "I'm back on your own Ollama models.");
+        }
+
+        private void LoadCloudModels(string key)
+        {
+            ThreadPool.QueueUserWorkItem(delegate
+            {
+                List<string> models = null;
+                try { models = Brain.CloudModels(key); }
+                catch (Exception) { }
+                Dispatcher.UIThread.Post(delegate { ShowCloudModels(models); });
+            });
+        }
+
+        internal void ShowCloudModels(List<string> models)
+        {
+            if (cloudMenu == null) return;
+            cloudMenu.Items.Clear();
+            if (models == null || models.Count == 0)
+            {
+                cloudMenu.Items.Add(new MenuItem { Header = "This key has no models.", IsEnabled = false });
+                return;
+            }
+            string current = Brain.Remote == null ? null : Brain.Remote.Model;
+            foreach (string id in models)
+            {
+                if (string.IsNullOrEmpty(id)) continue;
+                string model = id;
+                string header = id == SeeingCloud ? id + "  (can see your screen)" : id;
+                MenuItem pick = new MenuItem { Header = header, ToggleType = MenuItemToggleType.Radio, GroupName = "cloud", IsChecked = id == current };
+                pick.Click += delegate { PickCloudModel(id); };
+                cloudMenu.Items.Add(pick);
+            }
+        }
+
+        internal void PickCloudModel(string model)
+        {
+            if (string.IsNullOrEmpty(model) || Brain.Remote == null) return;
+            if (model == Brain.Remote.Model) return;
+            Brain.Cancel();
+            Brain.Remote.Model = model;
+            Brain.Model = model;
+            Brain.Forget();
+            Saved.CloudModel = model;
+            Save();
+            Reply(++asking, model, "I'm using " + model + " now.");
+        }
+
+        private void AskCloudKey()
+        {
+            Window prompt = new Window
+            {
+                Title = "NVIDIA API key",
+                Width = 520,
+                SizeToContent = SizeToContent.Height,
+                WindowStartupLocation = WindowStartupLocation.CenterOwner,
+                CanResize = false,
+                Background = new SolidColorBrush(Color.FromRgb(26, 26, 32))
+            };
+            StackPanel panel = new StackPanel { Margin = new Thickness(18), Spacing = 12 };
+            TextBlock hint = new TextBlock
+            {
+                Text = "Paste your NVIDIA API key. It starts with nvapi-. You can get a free one at build.nvidia.com, under API Keys. Capri keeps it in ~/.config/Capri/cloud-key and sends it only to NVIDIA.",
+                TextWrapping = TextWrapping.Wrap,
+                Foreground = Brushes.White
+            };
+            TextBox box = new TextBox { Watermark = "nvapi-...", Text = ReadCloudKey() ?? "" };
+            StackPanel buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Spacing = 8 };
+            Button cancel = new Button { Content = "Cancel" };
+            Button ok = new Button { Content = "Connect" };
+            buttons.Children.Add(cancel);
+            buttons.Children.Add(ok);
+            panel.Children.Add(hint);
+            panel.Children.Add(box);
+            panel.Children.Add(buttons);
+            prompt.Content = panel;
+            cancel.Click += delegate { prompt.Close(); };
+            ok.Click += delegate
+            {
+                string key = (box.Text ?? "").Trim();
+                prompt.Close();
+                WriteCloudKey(key);
+                ConnectCloud(true);
+            };
+            prompt.Show();
         }
 
         internal string OpenNotes()
@@ -1294,7 +1464,7 @@ namespace CapriDesktop
             Func<string, string> think = Think;
             if (think == null)
             {
-                if (Brain.Model == null) { Reply(ticket, text, Offline); FindBrain(); return; }
+                if (Brain.Model == null) { Reply(ticket, text, BrainDown()); FindBrain(); return; }
                 think = Brain.Ask;
             }
             Talk.Thinking(text);
@@ -1302,7 +1472,7 @@ namespace CapriDesktop
             {
                 string said;
                 try { said = Safety.Filter(think(text)); }
-                catch (BrainException error) { said = error.Message == Brain.Offline ? Offline : error.Told ? error.Message : "My brain couldn't answer: " + error.Message; }
+                catch (BrainException error) { said = error.Message == Brain.Offline ? BrainDown() : error.Told ? error.Message : "My brain couldn't answer: " + error.Message; }
                 catch (Exception error) { said = Brain.Explain(error) ?? "That reply was cancelled. Try again."; }
                 if (string.IsNullOrWhiteSpace(said)) said = "My brain sent an empty reply. Try again.";
                 Dispatcher.UIThread.Post(delegate { if (ticket == asking) Reply(ticket, text, said); });
