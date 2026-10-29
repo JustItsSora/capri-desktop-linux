@@ -157,7 +157,7 @@ namespace CapriDesktop
                 pet.SetRecall(16);
                 pet.SetSounds(30);
                 pet.Dancing = true;
-                if (pet.Saved.Wander != 3 || pet.Saved.Language != "French" || Brain.Language != "French" || Brain.Wordiness != 1 || Brain.Recall != 16 || pet.Saved.Sounds != 30 || Sfx.Level != 30 || pet.Picked != "Wander: Often | Français | Medium | Medium | Quiet | Dance to music | Dance") throw new Exception("Menu settings didn't stick: " + pet.Picked);
+                if (pet.Saved.Wander != 3 || pet.Saved.Language != "French" || Brain.Language != "French" || Brain.Wordiness != 1 || Brain.Recall != 16 || pet.Saved.Sounds != 30 || Sfx.Level != 30 || pet.Picked != "Wander: Often | Français | Medium | Medium | Quiet | 2 min | Dance to music | Dance") throw new Exception("Menu settings didn't stick: " + pet.Picked);
                 pet.SetDanceToMusic(false);
                 if (!pet.Saved.NoDance || pet.Picked.Contains("Dance to music")) throw new Exception("Dance to music didn't turn off.");
                 pet.SetDanceToMusic(true);
@@ -167,7 +167,7 @@ namespace CapriDesktop
                 pet.SetRecall(8);
                 pet.SetSounds(60);
                 pet.Dancing = false;
-                if (Brain.Language != null || pet.Saved.Language != null || pet.Picked != "Stay put | English | Short | Short | Normal | Dance to music") throw new Exception("Menu settings didn't go back: " + pet.Picked);
+                if (Brain.Language != null || pet.Saved.Language != null || pet.Picked != "Stay put | English | Short | Short | Normal | 2 min | Dance to music") throw new Exception("Menu settings didn't go back: " + pet.Picked);
                 Func<string, string[], string> runWas = Music.Run;
                 List<string> ran = new List<string>();
                 string status = "Playing";
@@ -443,7 +443,7 @@ namespace CapriDesktop
                     if (pet.Hip.Y != pet.Seat.Y) throw new Exception("Her feet left the shelf while walking.");
                     return false;
                 }
-                if (!Sitting() || pet.Seat.Window != shelfSpot.Window || pet.Hip.X == hipBefore.X) throw new Exception("She didn't walk and sit back down on the shelf.");
+                if (!Sitting() || pet.Seat.Window != shelfSpot.Window || pet.Hip.X == hipBefore.X) throw new Exception("She didn't walk and sit back down on the shelf: sitting " + Sitting() + ", hip " + pet.Hip + " from " + hipBefore + ", seat " + pet.Seat.Window + "@" + pet.Seat.Y + ", clip " + pet.Showing.Name + ".");
                 checks.Add("PASS walking: she gets up, walks along her window with her feet on it, and sits back down " + Math.Abs(pet.Hip.X - hipBefore.X) + " px away");
                 hipBefore = pet.Hip;
                 if (!pet.Blink() || !pet.Leaving) throw new Exception("She couldn't teleport along the shelf.");

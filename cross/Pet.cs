@@ -37,6 +37,7 @@ namespace CapriDesktop
         [DataMember] internal string VoiceId;
         [DataMember] internal bool Silent;
         [DataMember] internal int Typing;
+        [DataMember] internal int SleepAfter = 120;
     }
 
     internal sealed class Clip
@@ -45,9 +46,11 @@ namespace CapriDesktop
         internal readonly int Count;
         internal readonly double Fps;
         internal readonly double Height;
+        internal readonly string Name;
 
         internal Clip(string name, int count, double fps, double height)
         {
+            Name = name;
             Count = count;
             Fps = fps;
             Height = height;
@@ -123,6 +126,8 @@ namespace CapriDesktop
         private static readonly int[] Recalls = { 8, 16, 32 };
         private static readonly string[] SoundNames = { "Off", "Quiet", "Normal", "Loud" };
         private static readonly int[] SoundLevels = { 0, 30, 60, 100 };
+        private static readonly int[] SleepAfters = { 0, 60, 120, 300, 600, 1800, 3600 };
+        private static readonly string[] SleepNames = { "Off", "1 min", "2 min", "5 min", "10 min", "30 min", "1 hour" };
         internal const string Offline = "My brain's offline. Install Ollama from ollama.com, then run: ollama pull gemma4:e4b";
 
         private string BrainDown()
@@ -158,8 +163,20 @@ namespace CapriDesktop
         private readonly Clip perchArrive = new Clip("perch_arrive", 14, 15, 1);
         private readonly Clip perchLeave = new Clip("perch_leave", 12, 15, 1);
         private readonly Clip grin = new Clip("grin", 16, 8, 1.11);
+        private readonly Clip sleep = new Clip("sleep", 16, 6, 1.11);
+        private readonly Clip wake = new Clip("wake", 13, 15, 1.11);
+        private readonly Clip perchSleep = new Clip("perch_sleep", 16, 6, 1);
+        private readonly Clip hop = new Clip("hop", 12, 15, 1.11);
+        private readonly Clip hopPerch = new Clip("hop_perch", 12, 15, 1);
+        private readonly Clip love = new Clip("love", 16, 8, 1.11);
+        private readonly Clip lovePerch = new Clip("love_perch", 16, 8, 1);
+        private readonly Clip party = new Clip("party", 16, 16, 1.11);
+        private readonly Clip partyPerch = new Clip("party_perch", 16, 16, 1);
+        private readonly Clip angry = new Clip("angry", 16, 10, 1.11);
+        private readonly Clip angryPerch = new Clip("angry_perch", 16, 10, 1);
         internal static readonly string[] PetLines = { "Heh. Okay, I'll allow it.", "Pets logged. Morale up twelve percent.", "Careful, choom. I bite viruses." };
         private readonly List<double> petTurns = new List<double>();
+        private readonly List<double> clickTurns = new List<double>();
         private int petX;
         private int petWay;
         private double petAt = -60;
@@ -171,6 +188,7 @@ namespace CapriDesktop
         private readonly List<MenuItem> replyPicks = new List<MenuItem>();
         private readonly List<MenuItem> recallPicks = new List<MenuItem>();
         private readonly List<MenuItem> soundPicks = new List<MenuItem>();
+        private readonly List<MenuItem> sleepPicks = new List<MenuItem>();
         private MenuItem danceItem;
         private MenuItem musicItem;
         private MenuItem brainMenu;
@@ -210,6 +228,8 @@ namespace CapriDesktop
         private int idleCycle;
         private Clip blinkWith;
         private double nextGlitch;
+        private double lastActivity = -1;
+        private double sleepSince = -1;
         private bool pressed;
         private bool dragging;
         private bool falling;
@@ -269,6 +289,7 @@ namespace CapriDesktop
             Content = body;
             Fit();
             Play(idle);
+            lastActivity = Now;
             nextGlitch = 30 + random.NextDouble() * 30;
             ContextMenu = Menu();
             Talk = new Talk(this);
@@ -304,7 +325,7 @@ namespace CapriDesktop
         internal double BodySize { get { return body.Size; } }
         internal Clip Showing { get { return clip; } }
         internal Clip PerchGlitch { get { return perchGlitch; } }
-        internal IList<Clip> Clips { get { return new[] { idle, blink, blinkGlitch, glitch, dangle, perch, perchBlink, perchBlinkGlitch, perchGlitch, mouth, walk, dance, perchDance, arrive, leave, perchArrive, perchLeave, grin }; } }
+        internal IList<Clip> Clips { get { return new[] { idle, blink, blinkGlitch, glitch, dangle, perch, perchBlink, perchBlinkGlitch, perchGlitch, mouth, walk, dance, perchDance, arrive, leave, perchArrive, perchLeave, grin, sleep, wake, perchSleep, hop, hopPerch, love, lovePerch, party, partyPerch, angry, angryPerch }; } }
         internal Clip Arrival { get { return arrive; } }
         internal Clip PerchArrival { get { return perchArrive; } }
         internal Clip SeatDance { get { return perchDance; } }
@@ -454,13 +475,22 @@ namespace CapriDesktop
 
         private void Advance(double now)
         {
-            bool seated = clip == perch || clip == perchGlitch || clip == perchDance || clip == perchArrive || clip == perchLeave;
+            bool seated = clip == perch || clip == perchGlitch || clip == perchDance || clip == perchArrive || clip == perchLeave
+                || clip == perchSleep || clip == lovePerch || clip == partyPerch || clip == angryPerch || clip == hopPerch;
             bool perched = seat != null;
             if (perched && !seated && !walking) Play(perch);
             if ((!perched && seated) || (clip == dangle && !dragging && !falling)) Play(idle);
             int index = (int)((now - clipStart) * clip.Fps);
             if (clip == leave || clip == perchLeave) index = Math.Min(index, clip.Count - 1);
-            if ((clip == glitch && index >= glitch.Count) || (clip == grin && index >= grin.Count * 2)) { Play(idle); index = 0; }
+            if ((clip == glitch && index >= glitch.Count) || (clip == grin && index >= grin.Count * 2)
+                || (clip == hop && index >= hop.Count) || (clip == hopPerch && index >= hopPerch.Count)
+                || (clip == love && index >= love.Count * 3) || (clip == lovePerch && index >= lovePerch.Count * 3)
+                || (clip == party && index >= party.Count * 3) || (clip == partyPerch && index >= partyPerch.Count * 3)
+                || (clip == angry && index >= angry.Count * 2) || (clip == angryPerch && index >= angryPerch.Count * 2))
+            {
+                Play(perched ? perch : idle);
+                index = 0;
+            }
             if (clip == arrive && index >= arrive.Count)
             {
                 Play(idle);
@@ -473,11 +503,27 @@ namespace CapriDesktop
                 dropAfter = false;
                 if (seat == null && !dragging && !falling) Fall();
             }
-            bool still = !walking && !dragging && !falling && outro == null && Talk.Quiet;
+            bool sleeping = clip == sleep || clip == perchSleep;
+            if (sleeping)
+            {
+                if (sleepSince < 0) sleepSince = now;
+                if (!Talk.Quiet || (now - lastActivity < 1.5 && now - sleepSince > 0.3)) { Play(perched ? perch : wake); index = 0; sleepSince = -1; }
+            }
+            else
+            {
+                sleepSince = -1;
+                if (Saved.SleepAfter > 0 && lastActivity > 0 && now - lastActivity >= Saved.SleepAfter && !walking && !dragging && !falling && outro == null && (clip == idle || clip == perch) && Talk.Quiet)
+                {
+                    Play(perched ? perchSleep : sleep);
+                    index = 0;
+                }
+            }
+            if (clip == wake && index >= wake.Count) { Play(perched ? perch : idle); index = 0; }
+            bool still = !walking && !dragging && !falling && outro == null && Talk.Quiet && !sleeping;
             bool grooving = dancing || (musicOn && !Saved.NoDance);
             if (grooving && still && (clip == idle || clip == perch)) { Play(clip == perch ? perchDance : dance); index = 0; }
             if ((!grooving || !still) && (clip == dance || clip == perchDance)) { Play(clip == perchDance ? perch : idle); index = 0; }
-            if (clip == idle || clip == perch)
+            if ((clip == idle || clip == perch) && !sleeping)
             {
                 int cycle = index / clip.Count;
                 if (cycle != idleCycle)
@@ -496,7 +542,7 @@ namespace CapriDesktop
             int cell = index % clip.Count;
             Clip shown = clip;
             if ((clip == idle || clip == perch) && blinkWith != null && cell >= BlinkFrom && cell < BlinkFrom + blinkWith.Count) { shown = blinkWith; cell -= BlinkFrom; }
-            bool settled = !dragging && clip != dangle;
+            bool settled = !dragging && clip != dangle && !sleeping;
             body.Breathe = settled ? Math.Sin(now * 1.75) * 2.2 : 0;
             body.Tilt = settled ? Math.Sin(now * 0.95) * 0.65 : 0;
             body.Shown = shown;
@@ -712,7 +758,7 @@ namespace CapriDesktop
 
         internal int Pets { get { return petTicket; } }
 
-        internal bool Smiling { get { return seat != null ? clip == perch && blinkWith == perchBlink : clip == grin; } }
+        internal bool Smiling { get { return seat != null ? (clip == perch && blinkWith == perchBlink) || clip == lovePerch : clip == grin || clip == love; } }
 
         internal Point? BodySpot()
         {
@@ -724,27 +770,29 @@ namespace CapriDesktop
 
         internal void Stroke(PixelPoint cursor)
         {
+            double now = Now;
             if (pressed || dragging || falling || outro != null || Talk.Typing || !Opaque(this.PointToClient(cursor))) { petTurns.Clear(); petWay = 0; return; }
             int dx = cursor.X - petX;
             if (Math.Abs(dx) < 6) return;
-            double now = Now;
             int way = Math.Sign(dx);
             petX = cursor.X;
             if (petWay != 0 && way != petWay) petTurns.Add(now);
             petWay = way;
             petTurns.RemoveAll(at => now - at > 1.5);
-            if (petTurns.Count < 4 || now - petAt < 20) return;
+            if (petTurns.Count < 4 || now - petAt < 20) { lastActivity = now; return; }
             petTurns.Clear();
             petAt = now;
+            lastActivity = now;
             Petted();
         }
 
         private void Petted()
         {
             EndWalk();
-            if (seat != null) { Play(perch); blinkWith = perchBlink; }
-            else Play(grin);
+            if (seat != null) Play(lovePerch);
+            else Play(love);
             int ticket = ++petTicket;
+            lastActivity = Now;
             DispatcherTimer.RunOnce(() => PetLine(ticket), TimeSpan.FromMilliseconds(1300));
         }
 
@@ -771,7 +819,7 @@ namespace CapriDesktop
         internal void PetLine(int ticket)
         {
             if (ticket != petTicket || outro != null || !Talk.Quiet) return;
-            if (clip == grin) Play(idle);
+            if (clip == grin || clip == love || clip == lovePerch) Play(seat != null ? perch : idle);
             string line = PetLines[petLine++ % PetLines.Length];
             Talk.Answer("pets you", line);
             TypeAlong(line, ticket);
@@ -787,7 +835,12 @@ namespace CapriDesktop
 
         internal void React()
         {
-            Play(seat != null ? perchGlitch : glitch);
+            double now = Now;
+            lastActivity = now;
+            clickTurns.RemoveAll(at => now - at > 1.5);
+            clickTurns.Add(now);
+            if (clickTurns.Count >= 5) { clickTurns.Clear(); Play(seat != null ? angryPerch : angry); return; }
+            Play(seat != null ? hopPerch : hop);
         }
 
         internal void NoVoice()
@@ -806,6 +859,7 @@ namespace CapriDesktop
             dragging = true;
             Play(dangle);
             Talk.Dismiss();
+            lastActivity = Now;
         }
 
         internal bool Drop()
@@ -817,6 +871,7 @@ namespace CapriDesktop
             fallTo = target;
             fallSpeed = 0;
             fallStep = Now;
+            lastActivity = Now;
             return true;
         }
 
@@ -902,6 +957,23 @@ namespace CapriDesktop
             typingItem = new MenuItem { Header = "Typing sound", ToggleType = MenuItemToggleType.CheckBox };
             typingItem.Click += delegate { SetTyping(!TypingSound); };
             sounds.Items.Add(typingItem);
+            MenuItem sleep = new MenuItem { Header = "Sleep after" };
+            for (int i = 0; i < SleepAfters.Length; i++)
+            {
+                int sec = SleepAfters[i];
+                MenuItem pick = new MenuItem { Header = SleepNames[i], ToggleType = MenuItemToggleType.Radio, GroupName = "sleep" };
+                pick.Click += delegate { SetSleepAfter(sec); };
+                sleepPicks.Add(pick);
+                sleep.Items.Add(pick);
+            }
+            sleep.Items.Add(new Separator());
+            MenuItem sleepNow = new MenuItem { Header = "Sleep now" };
+            sleepNow.Click += delegate { ForceSleep(); };
+            sleep.Items.Add(sleepNow);
+            MenuItem wakeNow = new MenuItem { Header = "Wake now" };
+            wakeNow.Click += delegate { ForceWake(); };
+            sleep.Items.Add(wakeNow);
+            settings.Items.Add(sleep);
             MenuItem notes = new MenuItem { Header = "Open her notes (me.md)" };
             notes.Click += delegate { OpenNotes(); };
             MenuItem personality = new MenuItem { Header = "Edit her personality (personality.md)" };
@@ -960,6 +1032,7 @@ namespace CapriDesktop
             for (int i = 0; i < recallPicks.Count; i++) recallPicks[i].IsChecked = Recalls[i] == Brain.Recall;
             for (int i = 0; i < soundPicks.Count; i++) soundPicks[i].IsChecked = SoundLevels[i] == Sfx.Level;
             typingItem.IsChecked = TypingSound;
+            for (int i = 0; i < sleepPicks.Count; i++) sleepPicks[i].IsChecked = SleepAfters[i] == Saved.SleepAfter;
         }
 
         internal string Picked
@@ -967,7 +1040,7 @@ namespace CapriDesktop
             get
             {
                 List<string> on = new List<string>();
-                foreach (List<MenuItem> group in new[] { wanderPicks, languagePicks, replyPicks, recallPicks, soundPicks })
+                foreach (List<MenuItem> group in new[] { wanderPicks, languagePicks, replyPicks, recallPicks, soundPicks, sleepPicks })
                     foreach (MenuItem pick in group) if (pick.IsChecked) on.Add(pick.Header.ToString());
                 if (musicItem.IsChecked) on.Add("Dance to music");
                 if (danceItem.IsChecked) on.Add("Dance");
@@ -997,7 +1070,11 @@ namespace CapriDesktop
             });
         }
 
-        internal void HearMusic(bool on) { musicOn = on; }
+        internal void HearMusic(bool on)
+        {
+            if (on && !musicOn) { Play(seat != null ? partyPerch : party); }
+            musicOn = on;
+        }
 
         internal void SetWander(int level)
         {
@@ -1023,6 +1100,7 @@ namespace CapriDesktop
                 Saved.Nickname = Brain.Nickname;
                 Save();
             }
+            else Play(seat != null ? angryPerch : angry);
             Reply(++asking, NameHeard, callable ? Brain.Renamed(name) : Brain.NotCalling);
         }
 
@@ -1058,6 +1136,24 @@ namespace CapriDesktop
             Save();
             Sync();
             Sfx.Play(Cue.Hop);
+        }
+
+        internal void SetSleepAfter(int seconds)
+        {
+            Saved.SleepAfter = Math.Max(0, Math.Min(3600, seconds));
+            Save();
+            Sync();
+        }
+
+        internal void ForceSleep()
+        {
+            if (seat != null) Play(perchSleep);
+            else Play(sleep);
+        }
+
+        internal void ForceWake()
+        {
+            if (clip == sleep || clip == perchSleep) { lastActivity = Now; Play(seat != null ? perch : wake); }
         }
 
         private void RefreshBrains()
