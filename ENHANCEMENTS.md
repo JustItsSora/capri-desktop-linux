@@ -159,7 +159,7 @@ out/linux/Capri --smoke "$PWD/smoke/linux"
 - This fork keeps the upstream [PolyForm Noncommercial 1.0.0](LICENSE.md)
   license and the author's Required Notice exactly as it was.
 - The Linux additions in this fork were written by the maintainers of
-  [capri-desktop-linux](https://github.com/kyuog/capri-desktop-linux).
+  [capri-desktop-linux](https://github.com/JustItsSora/capri-desktop-linux).
 
 ## License
 

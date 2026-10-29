@@ -10,7 +10,7 @@
 > single-file Linux build.
 >
 > - **Upstream (original):** https://github.com/lachydotmcg/capri-desktop
-> - **This fork:** https://github.com/kyuog/capri-desktop-linux
+> - **This fork:** https://github.com/JustItsSora/capri-desktop-linux
 > - **What this fork adds on Linux:** [ENHANCEMENTS.md](ENHANCEMENTS.md)
 > - **License:** unchanged, [PolyForm Noncommercial 1.0.0](LICENSE.md), with the
 >   author's Required Notice preserved. Noncommercial use only.
