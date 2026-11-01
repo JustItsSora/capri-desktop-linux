@@ -88,6 +88,7 @@ namespace CapriDesktop
         internal double Size = 240;
         internal double Breathe;
         internal double Tilt;
+        internal double Stretch;
         internal Point Centre;
 
         internal Rect Place(Clip shown)
@@ -101,7 +102,10 @@ namespace CapriDesktop
         {
             Clip shown = Shown;
             if (shown == null) return;
-            using (context.PushTransform(Matrix.CreateTranslation(-Centre.X, -Centre.Y) * Matrix.CreateRotation(Tilt * Math.PI / 180) * Matrix.CreateTranslation(Centre.X, Centre.Y + Breathe)))
+            using (context.PushTransform(Matrix.CreateTranslation(-Centre.X, -Centre.Y)
+                    * Matrix.CreateScale(1, Stretch)
+                    * Matrix.CreateRotation(Tilt * Math.PI / 180)
+                    * Matrix.CreateTranslation(Centre.X, Centre.Y + Breathe)))
             {
                 Rect place = Place(shown);
                 context.DrawImage(shown.Strip, new Rect(Cell * shown.Wide, 0, shown.Wide, shown.Strip.PixelSize.Height), place);
@@ -226,6 +230,7 @@ namespace CapriDesktop
         private Clip clip;
         private double clipStart;
         private int idleCycle;
+        private int stretchCycle;
         private Clip blinkWith;
         private double nextGlitch;
         private double lastActivity = -1;
@@ -504,6 +509,7 @@ namespace CapriDesktop
                 if (seat == null && !dragging && !falling) Fall();
             }
             bool sleeping = clip == sleep || clip == perchSleep;
+            bool drowsy = !sleeping && Saved.SleepAfter > 0 && lastActivity > 0 && !walking && !dragging && !falling && outro == null && (clip == idle || clip == perch) && Talk.Quiet && now - lastActivity >= Saved.SleepAfter - 5;
             if (sleeping)
             {
                 if (sleepSince < 0) sleepSince = now;
@@ -523,7 +529,16 @@ namespace CapriDesktop
             bool grooving = dancing || (musicOn && !Saved.NoDance);
             if (grooving && still && (clip == idle || clip == perch)) { Play(clip == perch ? perchDance : dance); index = 0; }
             if ((!grooving || !still) && (clip == dance || clip == perchDance)) { Play(clip == perchDance ? perch : idle); index = 0; }
-            if ((clip == idle || clip == perch) && !sleeping)
+            if (drowsy && (clip == idle || clip == perch))
+            {
+                int cycle = index / clip.Count;
+                if (cycle != idleCycle)
+                {
+                    idleCycle = cycle;
+                    blinkWith = clip == perch ? perchBlink : blink;
+                }
+            }
+            else if ((clip == idle || clip == perch) && !sleeping)
             {
                 int cycle = index / clip.Count;
                 if (cycle != idleCycle)
@@ -545,6 +560,16 @@ namespace CapriDesktop
             bool settled = !dragging && clip != dangle && !sleeping;
             body.Breathe = settled ? Math.Sin(now * 1.75) * 2.2 : 0;
             body.Tilt = settled ? Math.Sin(now * 0.95) * 0.65 : 0;
+            if (settled && (clip == idle || clip == perch))
+            {
+                int cycle = index / clip.Count;
+                if (cycle != stretchCycle)
+                {
+                    stretchCycle = cycle;
+                    if (random.NextDouble() < 0.15) { body.Stretch = 1.03; DispatcherTimer.RunOnce(() => body.Stretch = 1.0, TimeSpan.FromSeconds(0.4)); }
+                }
+            }
+            else body.Stretch = 1.0;
             body.Shown = shown;
             body.Cell = cell;
             body.Talking = clip == idle && shown != blinkGlitch ? Talk.MouthCell(now) : -1;
@@ -771,6 +796,7 @@ namespace CapriDesktop
         internal void Stroke(PixelPoint cursor)
         {
             double now = Now;
+            clickTurns.Clear();
             if (pressed || dragging || falling || outro != null || Talk.Typing || !Opaque(this.PointToClient(cursor))) { petTurns.Clear(); petWay = 0; return; }
             int dx = cursor.X - petX;
             if (Math.Abs(dx) < 6) return;
@@ -857,6 +883,7 @@ namespace CapriDesktop
             fallTo = null;
             falling = false;
             dragging = true;
+            clickTurns.Clear();
             Play(dangle);
             Talk.Dismiss();
             lastActivity = Now;
@@ -865,6 +892,7 @@ namespace CapriDesktop
         internal bool Drop()
         {
             dragging = false;
+            clickTurns.Clear();
             Ledge target = Perch(Ledges(), Hip);
             if (target == null) { Save(); return false; }
             falling = true;
@@ -1153,7 +1181,7 @@ namespace CapriDesktop
 
         internal void ForceWake()
         {
-            if (clip == sleep || clip == perchSleep) { lastActivity = Now; Play(seat != null ? perch : wake); }
+            if (clip == sleep || clip == perchSleep) Play(seat != null ? perch : wake);
         }
 
         private void RefreshBrains()
