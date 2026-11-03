@@ -24,6 +24,8 @@ namespace CapriDesktop
         internal static readonly Color Dim = Color.FromArgb(122, 128, 138);
 
         internal static readonly Color Pink = Color.FromArgb(255, 46, 136);
+        private static readonly PrivateFontCollection fonts = new PrivateFontCollection();
+        private static IntPtr fontMemory;
         private static readonly FontFamily embedded = Embedded("Capri.Font.Mono.ttf");
         private static Cursor pointer;
 
@@ -59,8 +61,31 @@ namespace CapriDesktop
             }
         }
 
+        // Her artist's cursor, with its tip where the old arrow's was, so her clicks land the same place.
+        private static Bitmap ArtistPointer(int size)
+        {
+            using (System.IO.Stream stream = System.Reflection.Assembly.GetExecutingAssembly().GetManifestResourceStream("Capri.Cursor.png"))
+            {
+                if (stream == null) return null;
+                using (Bitmap source = new Bitmap(stream))
+                {
+                    Bitmap art = new Bitmap(size, size, PixelFormat.Format32bppArgb);
+                    float fit = size * 30f / 32 / Math.Max(source.Width, source.Height), inset = size * 2f / 32;
+                    using (Graphics graphics = Graphics.FromImage(art))
+                    {
+                        graphics.InterpolationMode = InterpolationMode.HighQualityBicubic;
+                        graphics.PixelOffsetMode = PixelOffsetMode.HighQuality;
+                        graphics.DrawImage(source, inset, inset, source.Width * fit, source.Height * fit);
+                    }
+                    return art;
+                }
+            }
+        }
+
         internal static Bitmap PointerArt(int size)
         {
+            Bitmap artist = ArtistPointer(size);
+            if (artist != null) return artist;
             float s = size / 32f;
             PointF[] arrow = { new PointF(2, 2), new PointF(2, 24), new PointF(8, 18.5f), new PointF(12, 27), new PointF(16, 25.2f), new PointF(12, 16.8f), new PointF(19.5f, 16.8f) };
             Bitmap art = new Bitmap(size, size, PixelFormat.Format32bppArgb);
@@ -97,21 +122,45 @@ namespace CapriDesktop
         }
 
         [DllImport("gdi32.dll")] private static extern IntPtr AddFontMemResourceEx(IntPtr font, uint length, IntPtr reserved, ref uint count);
+        [DllImport("gdi32.dll")] private static extern bool RemoveFontMemResourceEx(IntPtr font);
 
         private static FontFamily Embedded(string name)
         {
-            using (Stream stream = Assembly.GetExecutingAssembly().GetManifestResourceStream(name))
+            IntPtr memory = IntPtr.Zero, resource = IntPtr.Zero;
+            try
             {
-                if (stream == null) return null;
-                byte[] data = new byte[stream.Length];
-                stream.Read(data, 0, data.Length);
-                IntPtr memory = Marshal.AllocCoTaskMem(data.Length);
-                Marshal.Copy(data, 0, memory, data.Length);
-                uint count = 0;
-                AddFontMemResourceEx(memory, (uint)data.Length, IntPtr.Zero, ref count);
-                PrivateFontCollection collection = new PrivateFontCollection();
-                collection.AddMemoryFont(memory, data.Length);
-                return collection.Families.Length > 0 ? collection.Families[0] : null;
+                using (Stream stream = Assembly.GetExecutingAssembly().GetManifestResourceStream(name))
+                {
+                    if (stream == null) return null;
+                    byte[] data = new byte[stream.Length];
+                    int read = 0;
+                    while (read < data.Length)
+                    {
+                        int took = stream.Read(data, read, data.Length - read);
+                        if (took == 0) return null;
+                        read += took;
+                    }
+                    memory = Marshal.AllocCoTaskMem(data.Length);
+                    Marshal.Copy(data, 0, memory, data.Length);
+                    uint count = 0;
+                    resource = AddFontMemResourceEx(memory, (uint)data.Length, IntPtr.Zero, ref count);
+                    if (resource == IntPtr.Zero || count == 0) return null;
+                    fonts.AddMemoryFont(memory, data.Length);
+                    if (fonts.Families.Length == 0) return null;
+                    fontMemory = memory;
+                    return fonts.Families[0];
+                }
+            }
+            catch (ArgumentException) { return null; }
+            catch (ExternalException) { return null; }
+            catch (IOException) { return null; }
+            finally
+            {
+                if (memory != IntPtr.Zero && memory != fontMemory)
+                {
+                    if (resource != IntPtr.Zero) RemoveFontMemResourceEx(resource);
+                    Marshal.FreeCoTaskMem(memory);
+                }
             }
         }
 
@@ -126,6 +175,11 @@ namespace CapriDesktop
         internal static Font Mono(float size, FontStyle style, GraphicsUnit unit = GraphicsUnit.Pixel, string text = null)
         {
             if (embedded != null && Drawable(text)) return new Font(embedded, size, embedded.IsStyleAvailable(style) ? style : FontStyle.Regular, unit);
+            return FallbackMono(size, style, unit);
+        }
+
+        internal static Font FallbackMono(float size, FontStyle style, GraphicsUnit unit)
+        {
             foreach (string family in new[] { "Cascadia Mono", "Consolas", "Courier New" })
             {
                 Font font = new Font(family, size, style, unit);
@@ -175,6 +229,311 @@ namespace CapriDesktop
             return path;
         }
 
+        // How many columns a character takes in her mono bubbles: Chinese, Japanese and Korean characters and full-width forms
+        // take two, Thai vowel and tone marks (they sit above or below a letter) none, everything else one.
+        internal static int Cells(char c)
+        {
+            if (c == 0x0E31 || (c >= 0x0E34 && c <= 0x0E3A) || (c >= 0x0E47 && c <= 0x0E4E)) return 0;
+            return (c >= 0x1100 && c <= 0x115F) || (c >= 0x2E80 && c <= 0x303E) || (c >= 0x3041 && c <= 0x33FF) || (c >= 0x3400 && c <= 0x4DBF) || (c >= 0x4E00 && c <= 0x9FFF)
+                || (c >= 0xA000 && c <= 0xA4CF) || (c >= 0xA960 && c <= 0xA97F) || (c >= 0xAC00 && c <= 0xD7A3) || (c >= 0xF900 && c <= 0xFAFF) || (c >= 0xFE10 && c <= 0xFE19)
+                || (c >= 0xFE30 && c <= 0xFE6F) || (c >= 0xFF00 && c <= 0xFF60) || (c >= 0xFFE0 && c <= 0xFFE6) ? 2 : 1;
+        }
+
+        internal static int Cells(string text)
+        {
+            if (Indic(text)) return (int)Math.Ceiling(Span(text) - 0.01);
+            int cells = 0;
+            foreach (char c in text ?? "") cells += Cells(c);
+            return cells;
+        }
+
+        // True when the text has an Indian script in it, Devanagari to Malayalam, or Ethiopic (Amharic), Lao, Khmer, Burmese,
+        // Georgian or Armenian.
+        internal static bool Indic(string text)
+        {
+            foreach (char c in text ?? "")
+                if ((c >= 0x0900 && c <= 0x0DFF) || (c >= 0x1200 && c <= 0x139F) || (c >= 0x0E80 && c <= 0x0EFF) || (c >= 0x1780 && c <= 0x17FF) || (c >= 0x19E0 && c <= 0x19FF) || Myanmar(c)
+                    || (c >= 0x10A0 && c <= 0x10FF) || (c >= 0x1C90 && c <= 0x1CBF) || (c >= 0x0530 && c <= 0x058F)) return true;
+            return false;
+        }
+
+        // True when the text has Burmese in it.
+        internal static bool Burmese(string text)
+        {
+            foreach (char c in text ?? "") if (Myanmar(c)) return true;
+            return false;
+        }
+
+        private static bool Myanmar(char c) { return (c >= 0x1000 && c <= 0x109F) || (c >= 0xA9E0 && c <= 0xA9FF) || (c >= 0xAA60 && c <= 0xAA7F); }
+
+        // Her mono font has no stand-in for Burmese, so GDI+ would draw nothing there. Burmese draws in Myanmar Text instead,
+        // on the same baseline as the rest of the line, which stays in her font.
+        internal static Font Myanmar(Font font)
+        {
+            foreach (string family in new[] { "Myanmar Text", "Segoe UI" })
+            {
+                Font found = new Font(family, font.Size, font.Style, font.Unit);
+                if (found.Name == family) return found;
+                found.Dispose();
+            }
+            return new Font(FontFamily.GenericSansSerif, font.Size, font.Style, font.Unit);
+        }
+
+        // Draws a line like DrawString does, with any Burmese in Myanmar Text. Returns where a Burmese line ends, or x for
+        // any other line, which draws exactly as before.
+        internal static float Draw(Graphics graphics, string text, Font font, Brush brush, float x, float y)
+        {
+            if (!Burmese(text)) { graphics.DrawString(text, font, brush, x, y, StringFormat.GenericTypographic); return x; }
+            using (Font burmese = Myanmar(font))
+            {
+                float lift = Ascent(burmese) - Ascent(font);
+                foreach (string piece in Pieces(text))
+                {
+                    Font used = Myanmar(piece[0]) ? burmese : font;
+                    graphics.DrawString(piece, used, brush, x, used == font ? y : y - lift, StringFormat.GenericTypographic);
+                    x += graphics.MeasureString(piece, used, PointF.Empty, Spaced).Width;
+                }
+            }
+            return x;
+        }
+
+        private static float Mixed(Graphics graphics, string text, Font font, Font burmese)
+        {
+            float width = 0;
+            foreach (string piece in Pieces(text)) width += graphics.MeasureString(piece, Myanmar(piece[0]) ? burmese : font, PointF.Empty, Spaced).Width;
+            return width;
+        }
+
+        // The text in turns of Burmese and everything else.
+        private static List<string> Pieces(string text)
+        {
+            List<string> pieces = new List<string>();
+            int start = 0;
+            for (int i = 1; i <= text.Length; i++)
+                if (i == text.Length || Myanmar(text[i]) != Myanmar(text[start])) { pieces.Add(text.Substring(start, i - start)); start = i; }
+            return pieces;
+        }
+
+        private static float Ascent(Font font) { return font.Size * font.FontFamily.GetCellAscent(font.Style) / font.FontFamily.GetEmHeight(font.Style); }
+
+        // Indian scripts, Lao and Khmer join letters and marks into one shape, and Tamil, Kannada, Malayalam, Ethiopic, Georgian
+        // and Armenian draw wider than her columns, so their words are measured in her bubble's font instead of counted, and
+        // Burmese in Myanmar Text, which draws it. Other words still count by letter.
+        private static readonly Dictionary<string, double> measured = new Dictionary<string, double>();
+        private static Bitmap rulerPage;
+        private static Graphics ruler;
+        private static Font rulerFont;
+        private static Font rulerBurmese;
+        private static float rulerColumn;
+
+        private static double Span(string text)
+        {
+            double cells = 0;
+            string[] words = text.Split(' ');
+            foreach (string word in words)
+            {
+                if (!Indic(word)) { foreach (char c in word) cells += Cells(c); continue; }
+                lock (measured)
+                {
+                    double width;
+                    if (!measured.TryGetValue(word, out width))
+                    {
+                        if (ruler == null)
+                        {
+                            rulerPage = new Bitmap(1, 1);
+                            ruler = Graphics.FromImage(rulerPage);
+                            ruler.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
+                            rulerFont = Mono(14f, FontStyle.Regular, GraphicsUnit.Pixel, "क");
+                            rulerColumn = ruler.MeasureString(new string('M', 20), rulerFont, PointF.Empty, StringFormat.GenericTypographic).Width / 20f;
+                            rulerBurmese = Myanmar(rulerFont);
+                        }
+                        // A shade over, since hinting at other sizes can draw a little wider.
+                        width = (Burmese(word) ? Mixed(ruler, word, rulerFont, rulerBurmese) : ruler.MeasureString(word, rulerFont, PointF.Empty, StringFormat.GenericTypographic).Width) / rulerColumn * 1.03;
+                        if (measured.Count > 4000) measured.Clear();
+                        measured[word] = width;
+                    }
+                    cells += width;
+                }
+            }
+            return cells + words.Length - 1;
+        }
+
+        // True when the first letter is Arabic, Urdu, Persian or Hebrew, so the line reads right to left. Digits and
+        // punctuation don't decide it.
+        internal static bool RightToLeft(string text)
+        {
+            foreach (char c in text ?? "")
+            {
+                if ((c >= 0x0590 && c <= 0x08FF) || (c >= 0xFB1D && c <= 0xFDFF) || (c >= 0xFE70 && c <= 0xFEFE)) return true;
+                if (char.IsLetter(c)) return false;
+            }
+            return false;
+        }
+
+        // Right-to-left lines sit against the bubble's right edge and never wrap inside it.
+        internal static readonly StringFormat Leftward = Mirrored();
+
+        // Measures a line with its trailing spaces, for the caret after Thai and Indian scripts, whose letters don't keep to her columns.
+        internal static readonly StringFormat Spaced = Trailing();
+
+        private static StringFormat Trailing()
+        {
+            StringFormat format = (StringFormat)StringFormat.GenericTypographic.Clone();
+            format.FormatFlags |= StringFormatFlags.MeasureTrailingSpaces;
+            return format;
+        }
+
+        private static StringFormat Mirrored()
+        {
+            StringFormat format = (StringFormat)StringFormat.GenericTypographic.Clone();
+            // Arabic fonts can stand taller than her line, and a line that doesn't fully fit the box would otherwise not draw.
+            format.FormatFlags = (format.FormatFlags | StringFormatFlags.DirectionRightToLeft | StringFormatFlags.NoWrap) & ~StringFormatFlags.LineLimit;
+            return format;
+        }
+
+        // The longest start of the text that fits in that many columns.
+        internal static string Cut(string text, int columns)
+        {
+            text = text ?? "";
+            if (Indic(text))
+            {
+                // Whole letters with their marks, measured, and only where a line may break between letters.
+                bool[] breaks = Letters(text);
+                int fits = 0;
+                for (int end = 1; end <= text.Length; end++)
+                {
+                    if (end < text.Length && !breaks[end]) continue;
+                    if (Cells(text.Substring(0, end)) > columns) break;
+                    fits = end;
+                }
+                return text.Substring(0, fits);
+            }
+            int cells = 0, length = 0;
+            while (length < text.Length && cells + Cells(text[length]) <= columns) cells += Cells(text[length++]);
+            return text.Substring(0, length);
+        }
+
+        // True when the text has Thai in it.
+        internal static bool Thai(string text)
+        {
+            foreach (char c in text ?? "") if (c >= 0x0E01 && c <= 0x0E5B) return true;
+            return false;
+        }
+
+        // True when the text has Thai, Lao, Khmer or Burmese in it, which write no spaces between words.
+        internal static bool Unspaced(string text)
+        {
+            foreach (char c in text ?? "") if ((c >= 0x0E80 && c <= 0x0EFF) || (c >= 0x1780 && c <= 0x17FF) || (c >= 0x19E0 && c <= 0x19FF) || Myanmar(c)) return true;
+            return Thai(text);
+        }
+
+        [StructLayout(LayoutKind.Sequential)] private struct ScriptAnalysis { internal ushort Bits; internal ushort State; }
+        [StructLayout(LayoutKind.Sequential)] private struct ScriptItem { internal int Start; internal ScriptAnalysis Analysis; }
+        [DllImport("usp10.dll", CharSet = CharSet.Unicode)] private static extern int ScriptItemize(string text, int length, int most, IntPtr control, IntPtr state, [Out] ScriptItem[] items, out int count);
+        [DllImport("usp10.dll", CharSet = CharSet.Unicode)] private static extern int ScriptBreak(string text, int length, ref ScriptAnalysis analysis, [Out] byte[] marks);
+        [DllImport("icu.dll", CallingConvention = CallingConvention.Cdecl)] private static extern IntPtr ubrk_open(int type, [MarshalAs(UnmanagedType.LPStr)] string locale, IntPtr text, int length, ref int status);
+        [DllImport("icu.dll", CallingConvention = CallingConvention.Cdecl)] private static extern int ubrk_next(IntPtr iterator);
+        [DllImport("icu.dll", CallingConvention = CallingConvention.Cdecl)] private static extern void ubrk_close(IntPtr iterator);
+
+        // Where a line may break inside a word with Thai, Lao, Khmer or Burmese in it. They write no spaces between words, so a
+        // word breaker finds them: Windows' own for Thai, and for the others, which it doesn't know, the ICU that comes with
+        // Windows 10 1903 and later. Without ICU their lines break between letters.
+        internal static bool[] Breaks(string word)
+        {
+            if (!Thai(word))
+            {
+                bool[] words = Icu(word);
+                if (words != null) return words;
+            }
+            bool[] breaks = new bool[word.Length];
+            try
+            {
+                ScriptItem[] items = new ScriptItem[word.Length + 1];
+                int count = 0;
+                bool found = word.Length > 0 && ScriptItemize(word, word.Length, word.Length, IntPtr.Zero, IntPtr.Zero, items, out count) == 0;
+                for (int k = 0; found && k < count; k++)
+                {
+                    string part = word.Substring(items[k].Start, items[k + 1].Start - items[k].Start);
+                    byte[] marks = new byte[part.Length];
+                    found = ScriptBreak(part, part.Length, ref items[k].Analysis, marks) == 0;
+                    for (int i = 0; found && i < part.Length; i++) breaks[items[k].Start + i] = (marks[i] & 1) != 0;
+                }
+                if (found) return breaks;
+            }
+            catch (DllNotFoundException) { }
+            catch (EntryPointNotFoundException) { }
+            return Letters(word);
+        }
+
+        private static bool[] Icu(string word)
+        {
+            // ICU reads the text while it walks it, so it gets a copy the garbage collector can't move.
+            IntPtr text = Marshal.StringToHGlobalUni(word);
+            try
+            {
+                int status = 0;
+                IntPtr iterator = ubrk_open(2, "", text, word.Length, ref status);
+                if (iterator == IntPtr.Zero || status > 0) return null;
+                bool[] breaks = new bool[word.Length];
+                try { for (int at = ubrk_next(iterator); at > 0 && at < word.Length; at = ubrk_next(iterator)) breaks[at] = true; }
+                finally { ubrk_close(iterator); }
+                return breaks;
+            }
+            catch (DllNotFoundException) { return null; }
+            catch (EntryPointNotFoundException) { return null; }
+            finally { Marshal.FreeHGlobal(text); }
+        }
+
+        // Without a word breaker a line can still break between letters. A Thai or Lao line never breaks before a vowel or
+        // tone mark, or a vowel that follows its letter, and never after a vowel written before its letter. Every script keeps
+        // each letter with its marks, and with the next letter after a sign that joins them (a virama, or Khmer's coeng), and
+        // a Burmese line never breaks before ါ, ာ or း (newer .NET counts them as letters of their own, like Mac and Linux do)
+        // or a letter that ends the syllable before it.
+        internal static bool[] Letters(string word)
+        {
+            bool[] breaks = new bool[word.Length];
+            if (!Thai(word))
+            {
+                foreach (int start in System.Globalization.StringInfo.ParseCombiningCharacters(word))
+                    if (start > 0 && !Joins(word[start - 1]) && !Ends(word, start) && (word[start - 1] < 0x0EC0 || word[start - 1] > 0x0EC4) && "ະາຳໆຯါား".IndexOf(word[start]) < 0) breaks[start] = true;
+                return breaks;
+            }
+            for (int i = 1; i < word.Length; i++)
+                breaks[i] = Cells(word[i]) > 0 && "ฯะาำๅๆ".IndexOf(word[i]) < 0 && (word[i - 1] < 0x0E40 || word[i - 1] > 0x0E44);
+            return breaks;
+        }
+
+        // Signs that join the next letter to the one before: the Indian scripts' and Burmese viramas and Khmer's coeng.
+        private static bool Joins(char c)
+        {
+            return c == '्' || c == '্' || c == '੍' || c == '્' || c == '୍' || c == '்' || c == '్' || c == '್' || c == '്' || c == '្' || c == '္';
+        }
+
+        // True when the Burmese letter there ends the syllable before it: an asat silences it, or a virama stacks the next
+        // letter under it, after a dot below or not.
+        private static bool Ends(string word, int at)
+        {
+            int next = at + 1 < word.Length && word[at + 1] == '့' ? at + 2 : at + 1;
+            return next < word.Length && (word[next] == '်' || word[next] == '္');
+        }
+
+        // The longest start of a word with Thai, Lao, Khmer or Burmese in it that ends where a line may break and fits in that many columns.
+        internal static string Fill(string word, int columns)
+        {
+            bool[] breaks = Breaks(word);
+            int end = 0;
+            for (int i = 1; i <= word.Length; i++)
+            {
+                if (i < word.Length && !breaks[i]) continue;
+                if (Cells(word.Substring(0, i)) > columns) return word.Substring(0, end);
+                end = i;
+            }
+            return word;
+        }
+
+        // Lines by columns, so Chinese, Japanese and Korean fit the bubble too. They have no spaces to break at, so a run of
+        // them fills the rest of a line and carries on below, the way they're written. Thai, Lao, Khmer and Burmese do the same
+        // between their words. Other words only break when they're longer than a whole line.
         internal static List<string> Wrap(string text, int columns)
         {
             List<string> lines = new List<string>();
@@ -182,23 +541,60 @@ namespace CapriDesktop
             foreach (string piece in (text ?? "").Split(' '))
             {
                 string word = piece;
-                while (word.Length > columns)
+                bool thai = Unspaced(word);
+                if (word.Length > 0 && (Cells(word[0]) == 2 || thai) && line.Length > 0 && Cells(line) + 1 + Cells(word) > columns)
+                {
+                    string start = thai ? Fill(word, columns - Cells(line) - 1) : Kept(word, Cut(word, columns - Cells(line) - 1));
+                    if (start.Length > 0) { line += " " + start; word = word.Substring(start.Length); }
+                    lines.Add(line);
+                    line = "";
+                }
+                while (Cells(word) > columns)
                 {
                     if (line.Length > 0) { lines.Add(line); line = ""; }
-                    lines.Add(word.Substring(0, columns));
-                    word = word.Substring(columns);
+                    string cut = thai ? Fill(word, columns) : "";
+                    if (cut.Length == 0) cut = Kept(word, Cut(word, columns));
+                    if (cut.Length == 0) cut = word.Substring(0, 1);
+                    lines.Add(cut);
+                    word = word.Substring(cut.Length);
                 }
                 if (line.Length == 0) line = word;
-                else if (line.Length + 1 + word.Length <= columns) line += " " + word;
+                else if (Cells(line) + 1 + Cells(word) <= columns) line += " " + word;
                 else { lines.Add(line); line = word; }
             }
             if (line.Length > 0 || lines.Count == 0) lines.Add(line);
             return lines;
         }
+
+        // Chinese and Japanese never start a line with closing punctuation, so the character before it moves down with it.
+        private const string Closing = "，。、！？：；）」』】〕〉》｝’”…,.!?:;)";
+
+        private static string Kept(string word, string cut)
+        {
+            while (cut.Length > 1 && cut.Length < word.Length && Closing.IndexOf(word[cut.Length]) >= 0) cut = cut.Substring(0, cut.Length - 1);
+            return cut;
+        }
+
+        // How much of each line shows once `revealed` characters of the text are out. A break between words used up spaces,
+        // which count as revealed too; a word or a run of Chinese broken across lines used none.
+        internal static int[] Takes(List<string> lines, string text, int revealed)
+        {
+            int[] takes = new int[lines.Count];
+            int at = 0;
+            for (int i = 0; i < lines.Count && revealed > 0; i++)
+            {
+                takes[i] = Math.Min(lines[i].Length, revealed);
+                revealed -= takes[i];
+                at += lines[i].Length;
+                while (at < text.Length && text[at] == ' ') { at++; revealed--; }
+            }
+            return takes;
+        }
     }
 
     internal class Overlay : Form
     {
+        internal bool ClickThrough;
         private Bitmap shown;
         internal bool Above = true;
 
@@ -218,7 +614,7 @@ namespace CapriDesktop
             get
             {
                 CreateParams value = base.CreateParams;
-                value.ExStyle |= 0x00080000 | 0x00000080 | 0x08000000 | (Above ? 0x00000008 : 0);
+                value.ExStyle |= 0x00080000 | 0x00000080 | 0x08000000 | (Above ? 0x00000008 : 0) | (ClickThrough ? 0x20 : 0);
                 return value;
             }
         }
@@ -258,25 +654,62 @@ namespace CapriDesktop
         }
     }
 
+    // The pencil, wave and mic that show under her when you hover her, cyberpunk like her mini player: black plates with cut
+    // corners and a pink-to-cyan neon edge, TYPE and TALK in her mono font, a wave of segments that lights up with your mic
+    // level in voice chat, a red MUTED while the mic is muted, and a few frames of her glitch when it shows. The same size and
+    // hit areas as the old rounded pill, with every straight edge on whole pixels, so it stays crisp at 100%, 150% and 200%.
     internal sealed class TalkPill : Overlay
     {
         internal event Action Typing;
         internal event Action Voice;
         internal event Action Mute;
+        // Frames of the glitch it shows with, 45 ms each.
+        internal const int TearFrames = 4;
+        // Segments in each of the wave's five bars when it's full: the wave's shape, and the top of the mic level.
+        internal static readonly int[] Bars = { 2, 4, 5, 3, 2 };
+        internal static readonly Color Fill = Color.FromArgb(246, 9, 11, 15);
+        internal static readonly Color Unlit = Color.FromArgb(46, 52, 64);
+        internal static readonly Color Caption = Color.FromArgb(168, 174, 184);
+        private const int WashAlpha = 40;
+        private static readonly Random random = new Random();
+        private readonly Timer ticks = new Timer();
         private int hover;
         private float scale = 1;
         private Point centre;
         private bool chatting;
         private bool muted;
+        private bool listenForName;
         private int level;
+        private int tear;
+        private int seed;
+        internal bool Motion = true;
 
-        internal TalkPill() : base("Talk to Capri") { Cursor = Look.Pointer; }
+        internal TalkPill() : base("Talk to Capri")
+        {
+            Cursor = Look.Pointer;
+            ticks.Interval = 45;
+            ticks.Tick += delegate
+            {
+                if (tear > 0) tear--;
+                if (tear == 0) ticks.Stop();
+                if (Visible) Redraw();
+            };
+        }
 
         internal static Size Measure(float scale) { return new Size((int)Math.Round(100 * scale), (int)Math.Round(40 * scale)); }
 
         internal bool Chatting { get { return chatting; } }
 
         internal bool Muted { get { return muted; } }
+
+        internal bool ListenForName
+        {
+            get { return listenForName; }
+            set { if (listenForName == value) return; listenForName = value; if (Visible) Redraw(); }
+        }
+
+        // True for the few frames it glitches in.
+        internal bool Tearing { get { return tear > 0; } }
 
         internal void Place(Point topCentre, float value)
         {
@@ -305,59 +738,225 @@ namespace CapriDesktop
 
         private void Redraw()
         {
-            Bitmap image = Render(scale, hover, chatting, muted, level);
-            Present(image, new Point(centre.X - Measure(scale).Width / 2, centre.Y));
+            // Only showing it glitches: a hover, the mic level or her walking redraws it clean.
+            if (!Visible && Motion)
+            {
+                tear = TearFrames;
+                seed = random.Next(1, int.MaxValue);
+                ticks.Stop();
+                ticks.Start();
+            }
+            Present(Render(scale, hover, chatting, muted, level, tear, seed, listenForName), new Point(centre.X - Measure(scale).Width / 2, centre.Y));
         }
 
-        internal static Bitmap Render(float s, int hover, bool chatting = false, bool muted = false, int level = 0)
+        // For the smoke test: it glitches in when it shows, and a redraw while it's up stays clean.
+        internal bool GlitchesIn()
+        {
+            bool motion = Motion;
+            Motion = true;
+            try
+            {
+                Hide();
+                Redraw();
+                bool torn = Visible && tear == TearFrames;
+                using (Bitmap clean = Render(scale, hover, chatting, muted, level, 0, 0, listenForName)) torn = torn && Differs(Image, clean);
+                tear = 0;
+                ticks.Stop();
+                Redraw();
+                bool calm = tear == 0 && !ticks.Enabled;
+                using (Bitmap clean = Render(scale, hover, chatting, muted, level, 0, 0, listenForName)) calm = calm && !Differs(Image, clean);
+                return torn && calm;
+            }
+            finally { Motion = motion; }
+        }
+
+        private static bool Differs(Bitmap one, Bitmap two)
+        {
+            if (one == null || two == null || one.Size != two.Size) return true;
+            for (int y = 0; y < one.Height; y++)
+                for (int x = 0; x < one.Width; x++)
+                    if (one.GetPixel(x, y) != two.GetPixel(x, y)) return true;
+            return false;
+        }
+
+        // Its plate in the picture, in whole pixels.
+        internal static Rectangle Body(float s)
+        {
+            Size size = Measure(s);
+            int margin = (int)Math.Round(3 * s);
+            return new Rectangle(margin, margin, size.Width - margin * 2, size.Height - margin * 2);
+        }
+
+        // The mic button's square plate, right of the pill in voice chat.
+        internal static Rectangle MicBody(float s)
+        {
+            Size size = Measure(s);
+            int margin = (int)Math.Round(3 * s);
+            return new Rectangle(size.Width + (int)Math.Round(4 * s) + margin, margin, size.Height - margin * 2, size.Height - margin * 2);
+        }
+
+        internal static int Cut(float s) { return Math.Max(3, (int)Math.Round(6 * s)); }
+
+        internal static int EdgeWidth(float s) { return Math.Max(1, (int)Math.Round(1.5 * s)); }
+
+        internal static string Label(int part, bool chatting, bool muted, bool listenForName = false) { return part == 1 ? "TYPE" : chatting && muted ? "MUTED" : chatting && listenForName ? "CAPRI" : "TALK"; }
+
+        // How many of a bar's segments the mic level lights, for a level from 0 to 6.
+        internal static int Lit(int bar, int level)
+        {
+            if (level <= 0) return 0;
+            return Math.Max(1, (int)Math.Round(Bars[bar] * Math.Min(6, level) / 6.0, MidpointRounding.AwayFromZero));
+        }
+
+        private static int Square(float s) { return Math.Max(2, (int)Math.Round(2 * s)); }
+
+        private static int Pitch(float s) { return Math.Max(3, (int)Math.Round(3 * s, MidpointRounding.AwayFromZero)); }
+
+        // One segment of the wave: bar 0 to 4 from the left, row 0 at the bottom.
+        internal static Rectangle Segment(Rectangle meter, float s, int bar, int row)
+        {
+            int square = Square(s);
+            return new Rectangle(meter.Left + bar * Pitch(s), meter.Bottom - square - row * Pitch(s), square, square);
+        }
+
+        private static Font LabelFont(float s) { return Look.Mono(8.5f * s, FontStyle.Regular); }
+
+        // Where a label's letters land, from where it's drawn.
+        private static Rectangle Ink(Font font, string label)
+        {
+            using (GraphicsPath path = new GraphicsPath())
+            {
+                path.AddString(label, font.FontFamily, (int)font.Style, font.Size, PointF.Empty, StringFormat.GenericTypographic);
+                RectangleF ink = path.GetBounds();
+                return Rectangle.FromLTRB((int)Math.Floor(ink.Left), (int)Math.Floor(ink.Top), (int)Math.Ceiling(ink.Right), (int)Math.Ceiling(ink.Bottom));
+            }
+        }
+
+        // The icon's box and the label's letters in one half, 1 the pencil's and 2 the wave's, the pair in the middle of it.
+        internal static Rectangle[] Layout(float s, int part, string label)
+        {
+            using (Font font = LabelFont(s)) return Layout(s, part, Ink(font, label));
+        }
+
+        private static Rectangle[] Layout(float s, int part, Rectangle ink)
+        {
+            Rectangle body = Body(s);
+            int mid = Measure(s).Width / 2;
+            int edge = EdgeWidth(s);
+            int left = part == 1 ? body.Left + edge : mid;
+            int right = part == 1 ? mid : body.Right - edge;
+            int wide = part == 1 ? (int)Math.Round(12.5f * s) : Pitch(s) * 4 + Square(s);
+            int gap = (int)Math.Round(4 * s);
+            int start = left + (right - left - wide - gap - ink.Width + 1) / 2;
+            int middle = body.Top + body.Height / 2;
+            return new[] { new Rectangle(start, middle - wide / 2, wide, wide), new Rectangle(start + wide + gap, middle - ink.Height / 2, ink.Width, ink.Height) };
+        }
+
+        internal static Bitmap Render(float s, int hover, bool chatting = false, bool muted = false, int level = 0, int tear = 0, int seed = 0, bool listenForName = false)
         {
             Size size = Measure(s);
             Bitmap image = new Bitmap(chatting ? size.Width + (int)Math.Round(4 * s) + size.Height : size.Width, size.Height, PixelFormat.Format32bppPArgb);
             using (Graphics graphics = Graphics.FromImage(image))
+            using (Font font = LabelFont(s))
             {
                 graphics.SmoothingMode = SmoothingMode.AntiAlias;
                 graphics.PixelOffsetMode = PixelOffsetMode.HighQuality;
-                float margin = 3 * s;
-                RectangleF pill = new RectangleF(margin, margin, size.Width - margin * 2, size.Height - margin * 2);
-                Plate(graphics, pill, s);
+                graphics.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
+                Rectangle body = Body(s);
+                int mid = size.Width / 2;
+                Rectangle lit = hover == 1 ? Rectangle.FromLTRB(body.Left, body.Top, mid, body.Bottom) : hover == 2 ? Rectangle.FromLTRB(mid, body.Top, body.Right, body.Bottom) : Rectangle.Empty;
+                Plate(graphics, body, s, lit, Look.Pink, Look.Cyan);
+                // A slanted seam where the two halves' hit areas meet.
+                using (Pen seam = new Pen(Color.FromArgb(66, 72, 86), Math.Max(1, (int)Math.Round(s))))
+                    graphics.DrawLine(seam, mid + 1.5f * s, body.Top + 10 * s, mid - 1.5f * s, body.Bottom - 10 * s);
+                // Her glitch, like her mini player: slivers of the edge torn loose, cyan at the top right and pink at the bottom left.
+                int sliver = Math.Max(1, (int)Math.Round(s));
+                using (Brush cyan = new SolidBrush(Color.FromArgb(220, Look.Cyan))) graphics.FillRectangle(cyan, body.Right - (int)Math.Round(32 * s), body.Top - (int)Math.Round(2 * s), (int)Math.Round(15 * s), sliver);
+                using (Brush pink = new SolidBrush(Color.FromArgb(220, Look.Pink))) graphics.FillRectangle(pink, body.Left + (int)Math.Round(12 * s), body.Bottom + (int)Math.Round(2 * s) - sliver, (int)Math.Round(11 * s), sliver);
+                Color wash = Mix(Fill, Look.Cyan, WashAlpha);
+                string talk = Label(2, chatting, muted, listenForName);
+                Rectangle[] pencil = Layout(s, 1, Ink(font, "TYPE"));
+                Rectangle[] wave = Layout(s, 2, Ink(font, talk));
+                DrawPencil(graphics, new PointF(pencil[0].X + pencil[0].Width / 2f, pencil[0].Y + pencil[0].Height / 2f), 0.9f * s, hover == 1 ? Look.Cyan : Look.Ink, hover == 1 ? wash : Fill);
+                DrawLabel(graphics, "TYPE", font, pencil[1], hover == 1 ? Look.Cyan : Caption);
+                DrawMeter(graphics, wave[0], s, chatting, muted, level, hover == 2 || chatting ? Look.Cyan : Look.Ink);
+                DrawLabel(graphics, talk, font, wave[1], chatting && muted ? Look.Red : hover == 2 || chatting ? Look.Cyan : Caption);
                 if (chatting)
                 {
-                    RectangleF button = new RectangleF(image.Width - size.Height + margin, margin, size.Height - margin * 2, size.Height - margin * 2);
-                    Plate(graphics, button, s);
-                    PointF spot = new PointF(button.X + button.Width / 2, button.Y + button.Height / 2);
-                    if (hover == 3)
-                    {
-                        float radius = button.Height * 0.4f;
-                        using (Brush glow = new SolidBrush(Color.FromArgb(30, 255, 255, 255))) graphics.FillEllipse(glow, spot.X - radius, spot.Y - radius, radius * 2, radius * 2);
-                    }
-                    DrawMic(graphics, spot, s, hover == 3 ? Look.Cyan : Look.Ink, muted);
+                    Rectangle mic = MicBody(s);
+                    Color edge = muted ? Look.Red : Look.Cyan;
+                    Plate(graphics, mic, s, hover == 3 ? mic : Rectangle.Empty, edge, edge);
+                    DrawMic(graphics, new PointF(mic.X + mic.Width / 2f, mic.Y + mic.Height / 2f), s, hover == 3 ? Look.Cyan : muted ? Look.Dim : Look.Ink, muted, hover == 3 ? wash : Fill);
                 }
-                float middle = pill.X + pill.Width / 2;
-                using (Pen divider = new Pen(Color.FromArgb(70, 73, 82), 1.2f * s)) graphics.DrawLine(divider, middle, pill.Y + pill.Height * 0.27f, middle, pill.Bottom - pill.Height * 0.27f);
-                PointF pencil = new PointF(pill.X + pill.Width * 0.26f, pill.Y + pill.Height / 2);
-                PointF wave = new PointF(pill.X + pill.Width * 0.74f, pill.Y + pill.Height / 2);
-                if (hover == 1 || hover == 2)
-                {
-                    PointF lit = hover == 1 ? pencil : wave;
-                    float radius = pill.Height * 0.4f;
-                    using (Brush glow = new SolidBrush(Color.FromArgb(30, 255, 255, 255))) graphics.FillEllipse(glow, lit.X - radius, lit.Y - radius, radius * 2, radius * 2);
-                }
-                DrawPencil(graphics, pencil, s, hover == 1 ? Look.Cyan : Look.Ink);
-                DrawWave(graphics, wave, s, hover == 2 || chatting ? Look.Cyan : Look.Ink, chatting ? 0.45f + level * 0.14f : 1);
             }
+            if (tear > 0) Tear(image, s, Math.Min(1, (float)tear / TearFrames), seed + tear);
             return image;
         }
 
-        private static void Plate(Graphics graphics, RectangleF area, float s)
+        // A plate with cut corners: a soft glow, the black fill with faint scan lines, a cyan wash where it's hovered, and a neon
+        // edge from one colour to the other, inside the box so its straight edges land on whole pixels.
+        internal static void Plate(Graphics graphics, Rectangle box, float s, Rectangle lit, Color from, Color to)
         {
-            using (GraphicsPath path = Look.Rounded(area, area.Height / 2))
+            int cut = Cut(s);
+            int edge = EdgeWidth(s);
+            int margin = (int)Math.Round(3 * s);
+            PointF start = new PointF(box.Left - margin - 1, 0), end = new PointF(box.Right + margin + 1, 0);
+            float middle = box.Top + box.Height / 2f;
+            using (GraphicsPath outline = Look.Plate(box, cut, -1, middle, 0, true))
             {
-                using (Brush fill = new SolidBrush(Color.FromArgb(244, 20, 21, 25))) graphics.FillPath(fill, path);
-                using (Pen edge = new Pen(Color.FromArgb(70, 73, 82), 1.2f * s)) graphics.DrawPath(edge, path);
+                using (LinearGradientBrush haze = new LinearGradientBrush(start, end, Color.FromArgb(34, from), Color.FromArgb(34, to)))
+                using (Pen wide = new Pen(haze, margin * 2)) graphics.DrawPath(wide, outline);
+                using (LinearGradientBrush haze = new LinearGradientBrush(start, end, Color.FromArgb(70, from), Color.FromArgb(70, to)))
+                using (Pen near = new Pen(haze, margin)) graphics.DrawPath(near, outline);
+                using (Brush fill = new SolidBrush(Fill)) graphics.FillPath(fill, outline);
+                graphics.SetClip(outline);
+                int line = Math.Max(1, (int)Math.Round(s));
+                using (Pen scan = new Pen(Color.FromArgb(9, 255, 255, 255), line))
+                    for (int row = box.Top; row < box.Bottom; row += Math.Max(3, (int)Math.Round(3 * s))) graphics.DrawLine(scan, box.Left, row + line / 2f, box.Right, row + line / 2f);
+                if (!lit.IsEmpty) using (Brush wash = new SolidBrush(Color.FromArgb(WashAlpha, Look.Cyan))) graphics.FillRectangle(wash, lit);
+                graphics.ResetClip();
+            }
+            float inset = edge / 2f;
+            using (GraphicsPath rim = Look.Plate(new RectangleF(box.Left + inset, box.Top + inset, box.Width - edge, box.Height - edge), cut - inset * 0.586f, -1, middle, 0, true))
+            using (LinearGradientBrush ink = new LinearGradientBrush(start, end, from, to))
+            using (Pen pen = new Pen(ink, edge))
+                graphics.DrawPath(pen, rim);
+        }
+
+        private static Color Mix(Color under, Color over, int alpha)
+        {
+            return Color.FromArgb(under.R + (over.R - under.R) * alpha / 255, under.G + (over.G - under.G) * alpha / 255, under.B + (over.B - under.B) * alpha / 255);
+        }
+
+        private static void DrawLabel(Graphics graphics, string label, Font font, Rectangle box, Color colour)
+        {
+            Rectangle ink = Ink(font, label);
+            using (Brush brush = new SolidBrush(colour)) graphics.DrawString(label, font, brush, box.Left - ink.Left, box.Top - ink.Top, StringFormat.GenericTypographic);
+        }
+
+        // The wave as five bars of square segments. Out of voice chat it's the whole wave; in voice chat the segments light up to
+        // your mic level and the rest stay dark, all of them while the mic is muted.
+        // Lachy liked the old wave better (29 Oct): five rounded bars that stretch with your mic level in voice chat, and stay low
+        // and grey while the mic is muted.
+        private static void DrawMeter(Graphics graphics, Rectangle meter, float s, bool chatting, bool muted, int level, Color colour)
+        {
+            float[] heights = { 5, 10, 14, 9, 4 };
+            float stretch = !chatting ? 1 : 0.45f + (muted ? 0 : level) * 0.14f;
+            PointF centre = new PointF(meter.X + meter.Width / 2f, meter.Y + meter.Height / 2f);
+            using (Pen bar = new Pen(chatting && muted ? Look.Dim : colour, 2.3f * s))
+            {
+                bar.StartCap = LineCap.Round;
+                bar.EndCap = LineCap.Round;
+                for (int i = 0; i < heights.Length; i++)
+                {
+                    float x = centre.X + (i - 2) * 3.6f * s;
+                    float half = Math.Max(1.5f, heights[i] * stretch) * s / 2;
+                    graphics.DrawLine(bar, x, centre.Y - half, x, centre.Y + half);
+                }
             }
         }
 
-        private static void DrawMic(Graphics graphics, PointF centre, float s, Color colour, bool muted)
+        private static void DrawMic(Graphics graphics, PointF centre, float s, Color colour, bool muted, Color back)
         {
             float x = centre.X;
             float y = centre.Y + 0.5f * s;
@@ -373,7 +972,7 @@ namespace CapriDesktop
                 graphics.DrawLine(line, x - 3.5f * s, y + 7 * s, x + 3.5f * s, y + 7 * s);
             }
             if (!muted) return;
-            using (Pen gap = new Pen(Color.FromArgb(20, 21, 25), 4.2f * s))
+            using (Pen gap = new Pen(back, 4.2f * s))
             using (Pen slash = new Pen(Look.Red, 2 * s))
             {
                 slash.StartCap = LineCap.Round;
@@ -383,47 +982,64 @@ namespace CapriDesktop
             }
         }
 
-        private static void DrawPencil(Graphics graphics, PointF centre, float s, Color colour)
+        // A square-cut pencil at 45 degrees, centred on where its outline's middle falls.
+        private static void DrawPencil(Graphics graphics, PointF centre, float k, Color colour, Color back)
         {
             GraphicsState state = graphics.Save();
-            graphics.TranslateTransform(centre.X, centre.Y);
+            graphics.TranslateTransform(centre.X + 0.5f * k, centre.Y - 0.5f * k);
             graphics.RotateTransform(-45);
             using (Brush ink = new SolidBrush(colour))
-            using (GraphicsPath body = Look.Rounded(new RectangleF(-8 * s, -2.5f * s, 12 * s, 5 * s), 1.2f * s))
             {
-                graphics.FillPath(ink, body);
-                graphics.FillPolygon(ink, new[] { new PointF(4.6f * s, -2.5f * s), new PointF(9 * s, 0), new PointF(4.6f * s, 2.5f * s) });
+                graphics.FillRectangle(ink, -8 * k, -2.5f * k, 12.6f * k, 5 * k);
+                graphics.FillPolygon(ink, new[] { new PointF(4.6f * k, -2.5f * k), new PointF(9 * k, 0), new PointF(4.6f * k, 2.5f * k) });
             }
-            using (Pen gap = new Pen(Color.FromArgb(20, 21, 25), 1.1f * s))
+            using (Pen gap = new Pen(back, 1.1f * k))
             {
-                graphics.DrawLine(gap, -4.8f * s, -3 * s, -4.8f * s, 3 * s);
-                graphics.DrawLine(gap, 4f * s, -3 * s, 4f * s, 3 * s);
+                graphics.DrawLine(gap, -4.8f * k, -3 * k, -4.8f * k, 3 * k);
+                graphics.DrawLine(gap, 4f * k, -3 * k, 4f * k, 3 * k);
             }
             graphics.Restore(state);
         }
 
-        private static void DrawWave(Graphics graphics, PointF centre, float s, Color colour, float stretch = 1)
+        // The glitch it shows with: rows slip sideways and take a tint of her pink or cyan, less each frame. Seeded, so a redraw
+        // in the same frame tears the same way.
+        private static void Tear(Bitmap image, float s, float amount, int seed)
         {
-            float[] heights = { 5, 10, 14, 9, 4 };
-            using (Pen bar = new Pen(colour, 2.3f * s))
+            Random roll = new Random(seed);
+            bool chatting = image.Width > Measure(s).Width;
+            using (Bitmap clean = image.Clone(new Rectangle(0, 0, image.Width, image.Height), image.PixelFormat))
+            using (Graphics graphics = Graphics.FromImage(image))
+            using (Brush clear = new SolidBrush(Color.Transparent))
             {
-                bar.StartCap = LineCap.Round;
-                bar.EndCap = LineCap.Round;
-                for (int i = 0; i < heights.Length; i++)
+                int bands = 2 + (int)Math.Round(2 * amount);
+                for (int i = 0; i < bands; i++)
                 {
-                    float x = centre.X + (i - 2) * 3.6f * s;
-                    float half = Math.Max(1.5f, heights[i] * stretch) * s / 2;
-                    graphics.DrawLine(bar, x, centre.Y - half, x, centre.Y + half);
+                    int band = Math.Max(2, (int)Math.Round((2 + roll.Next(6)) * s));
+                    int top = roll.Next(Math.Max(1, image.Height - band));
+                    int shift = (roll.Next(2) == 0 ? -1 : 1) * Math.Max(1, (int)Math.Round((2 + roll.Next(6)) * s * amount));
+                    Rectangle strip = new Rectangle(0, top, image.Width, band);
+                    graphics.SetClip(strip);
+                    graphics.CompositingMode = CompositingMode.SourceCopy;
+                    graphics.FillRectangle(clear, strip);
+                    graphics.DrawImage(clean, new Rectangle(shift, 0, image.Width, image.Height));
+                    graphics.CompositingMode = CompositingMode.SourceOver;
+                    graphics.SetClip(Body(s));
+                    if (chatting) graphics.SetClip(MicBody(s), CombineMode.Union);
+                    graphics.IntersectClip(strip);
+                    using (Brush tint = new SolidBrush(Color.FromArgb((int)(96 * amount), i % 2 == 0 ? Look.Pink : Look.Cyan))) graphics.FillRectangle(tint, strip);
+                    graphics.ResetClip();
                 }
             }
         }
 
-        private int PartAt(int x)
+        internal static int PartAt(int x, float s, bool chatting)
         {
-            int wide = Measure(scale).Width;
+            int wide = Measure(s).Width;
             if (chatting && x >= wide) return 3;
             return x < wide / 2 ? 1 : 2;
         }
+
+        private int PartAt(int x) { return PartAt(x, scale, chatting); }
 
         protected override void OnMouseMove(MouseEventArgs e)
         {
@@ -449,6 +1065,75 @@ namespace CapriDesktop
             if (part == 1) { if (Typing != null) Typing(); }
             else if (part == 3) { if (Mute != null) Mute(); }
             else if (Voice != null) Voice();
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing) ticks.Dispose();
+            base.Dispose(disposing);
+        }
+
+        // The smoke test's checks of its look at 100%, 150% and 200%: null when they pass, or what's wrong.
+        internal static string Check()
+        {
+            foreach (float s in new[] { 1f, 1.5f, 2f })
+            {
+                string at = " at " + (int)Math.Round(s * 100) + "%";
+                Size size = Measure(s);
+                Rectangle body = Body(s), mic = MicBody(s);
+                int cut = Cut(s), edge = EdgeWidth(s), mid = size.Width / 2, chatWide = size.Width + (int)Math.Round(4 * s) + size.Height;
+                Bitmap[] shots = { Render(s, 0), Render(s, 1), Render(s, 2), Render(s, 0, true, false, 0), Render(s, 0, true, false, 3), Render(s, 0, true, false, 6), Render(s, 0, true, true, 0), Render(s, 3, true, false, 0) };
+                try
+                {
+                    Bitmap idle = shots[0], typing = shots[1], talking = shots[2], live0 = shots[3], live3 = shots[4], live6 = shots[5], hushed = shots[6], micLit = shots[7];
+                    if (idle.Size != size || typing.Size != size || live0.Width != chatWide || live0.Height != size.Height) return "Its size changed" + at + ": " + idle.Size + ", " + live0.Size;
+                    if (PartAt(0, s, false) != 1 || PartAt(mid - 1, s, false) != 1 || PartAt(mid, s, false) != 2 || PartAt(size.Width - 1, s, true) != 2 || PartAt(size.Width, s, true) != 3 || PartAt(chatWide - 1, s, true) != 3 || PartAt(size.Width + 2, s, false) != 2) return "Its hit areas moved" + at;
+                    foreach (Rectangle plate in new[] { body, mic })
+                    {
+                        Bitmap shot = plate == body ? idle : live0;
+                        if (shot.GetPixel(plate.Left, plate.Top).A > 140 || shot.GetPixel(plate.Right - 1, plate.Bottom - 1).A > 140 || shot.GetPixel(plate.Right - 1, plate.Top).A > 140
+                            || shot.GetPixel(plate.Left, plate.Top + cut + 1).A < 250 || shot.GetPixel(plate.Right - 1, plate.Bottom - cut - 2).A < 250 || shot.GetPixel(plate.Left + cut + 1, plate.Top).A < 250 || shot.GetPixel(plate.Right - cut - 2, plate.Bottom - 1).A < 250)
+                            return "Its corners aren't cut" + at;
+                    }
+                    if (Brightest(idle.GetPixel(body.Left + cut + 2, body.Top + edge - 1)) < 150 || Brightest(idle.GetPixel(body.Left + cut + 2, body.Top + edge)) > 60 || Brightest(idle.GetPixel(body.Left + edge - 1, body.Top + body.Height / 2)) < 150 || Brightest(idle.GetPixel(body.Left + edge, body.Top + body.Height / 2)) > 60)
+                        return "Its neon edge isn't crisp" + at;
+                    if (!Red(hushed.GetPixel(mic.Left, mic.Top + cut + 1)) || Red(live0.GetPixel(mic.Left, mic.Top + cut + 1))) return "The mic button's edge didn't go red only while muted" + at;
+                    Rectangle[] pencil = Layout(s, 1, "TYPE"), wave = Layout(s, 2, "TALK"), hush = Layout(s, 2, "MUTED");
+                    int letters = (int)(6 * s * s);
+                    if (Count(idle, pencil[1], Grey) < letters || Count(idle, wave[1], Grey) < letters) return "Its TYPE and TALK labels are missing" + at;
+                    if (Count(typing, pencil[1], Cyan) < letters || Count(typing, wave[1], Cyan) > 0 || Count(talking, wave[1], Cyan) < letters || Count(talking, pencil[1], Cyan) > 0) return "Hovering didn't light just its part cyan" + at;
+                    Point tip = new Point(pencil[0].X + pencil[0].Width / 2, pencil[0].Y + pencil[0].Height / 2);
+                    if (!Grey(idle.GetPixel(tip.X, tip.Y)) || !Cyan(typing.GetPixel(tip.X, tip.Y))) return "The pencil didn't light cyan on hover" + at;
+                    if (Count(hushed, hush[1], Red) < letters || Count(live0, hush[1], Red) > 0 || Count(idle, hush[1], Red) > 0) return "MUTED didn't show in red, or showed unmuted" + at;
+                    Rectangle core = Rectangle.Inflate(mic, -cut - edge, -cut - edge);
+                    if (Count(micLit, core, Cyan) < letters || Count(live0, core, Cyan) > 0) return "Hovering the mic didn't light it cyan" + at;
+                    Rectangle waveBox = Rectangle.Inflate(wave[0], (int)(4 * s), (int)(4 * s)), hushBox = Rectangle.Inflate(hush[0], (int)(4 * s), (int)(4 * s));
+                    Point middle = new Point(wave[0].X + wave[0].Width / 2, wave[0].Y + wave[0].Height / 2);
+                    if (!Grey(idle.GetPixel(middle.X, middle.Y)) || !Cyan(talking.GetPixel(middle.X, middle.Y))) return "The wave didn't show" + at;
+                    int quietest = Count(live0, waveBox, Cyan), middling = Count(live3, waveBox, Cyan), loudest = Count(live6, waveBox, Cyan);
+                    if (!(quietest < middling && middling < loudest)) return "The wave didn't stretch with the mic level" + at + ": " + quietest + ", " + middling + ", " + loudest;
+                    if (Count(hushed, hushBox, Cyan) > 0) return "The wave lit while muted" + at;
+                }
+                finally { foreach (Bitmap shot in shots) shot.Dispose(); }
+            }
+            return null;
+        }
+
+        private static int Brightest(Color c) { return Math.Max(c.R, Math.Max(c.G, c.B)); }
+
+        private static bool Grey(Color c) { return c.A > 200 && Math.Min(c.R, Math.Min(c.G, c.B)) > 80 && Brightest(c) - Math.Min(c.R, Math.Min(c.G, c.B)) < 40; }
+
+        private static bool Cyan(Color c) { return c.A > 200 && c.G > 140 && c.B > 150 && c.R < 130; }
+
+        private static bool Red(Color c) { return c.A > 200 && c.R > 150 && c.G < 90 && c.B < 120; }
+
+        private static int Count(Bitmap image, Rectangle box, Func<Color, bool> test)
+        {
+            int count = 0;
+            for (int y = Math.Max(0, box.Top); y < Math.Min(image.Height, box.Bottom); y++)
+                for (int x = Math.Max(0, box.Left); x < Math.Min(image.Width, box.Right); x++)
+                    if (test(image.GetPixel(x, y))) count++;
+            return count;
         }
     }
 
@@ -1510,10 +2195,11 @@ namespace CapriDesktop
         private int reach = 40;
         private float scale = 1;
         private double tapped = -1;
+        internal readonly CursorBolts Bolts = new CursorBolts();
 
         internal HerPointer() : base("Capri pointer")
         {
-            ticks.Interval = 16;
+            ticks.Interval = 33;
             ticks.Tick += delegate { Step(); };
         }
 
@@ -1553,15 +2239,17 @@ namespace CapriDesktop
             using (Graphics screen = Graphics.FromHwnd(IntPtr.Zero)) scale = Math.Max(1f, screen.DpiX / 96f);
             int size = (int)Math.Round(36 * scale);
             if (arrow == null || arrow.Width != size) { if (arrow != null) arrow.Dispose(); arrow = Look.PointerArt(size); }
-            lock (gate) { tip = at; reach = (int)Math.Round(40 * scale); }
+            lock (gate) { tip = at; reach = (int)Math.Round(90 * scale); }
             tapped = -1;
             Render();
+            if (Bolts.Look.On) ticks.Start();
         }
 
         internal void Tap()
         {
             if (!Visible) return;
             tapped = watch.Elapsed.TotalSeconds;
+            Bolts.Tap();
             ticks.Start();
             Render();
         }
@@ -1570,12 +2258,13 @@ namespace CapriDesktop
         {
             ticks.Stop();
             tapped = -1;
+            Bolts.Clear();
             if (Visible) Hide();
         }
 
         private void Step()
         {
-            if (tapped >= 0 && watch.Elapsed.TotalSeconds - tapped > Ripple) { tapped = -1; ticks.Stop(); }
+            if (tapped >= 0 && watch.Elapsed.TotalSeconds - tapped > Ripple) { tapped = -1; if (!Bolts.Look.On) ticks.Stop(); }
             if (Visible) Render();
         }
 
@@ -1597,6 +2286,9 @@ namespace CapriDesktop
                     using (Pen pink = new Pen(Color.FromArgb(alpha, Look.Pink), (2.6f - 1.2f * eased) * scale)) graphics.DrawEllipse(pink, reach - radius, reach - radius, radius * 2, radius * 2);
                 }
                 float s = arrow.Width / 32f;
+                double now = watch.Elapsed.TotalSeconds;
+                Bolts.Step(now, at, scale);
+                Bolts.Draw(graphics, new PointF(reach, reach), at, now, scale);
                 graphics.DrawImage(arrow, reach - 2 * s, reach - 2 * s, arrow.Width, arrow.Height);
             }
             Present(frame, new Point(at.X - reach, at.Y - reach));
@@ -1712,6 +2404,9 @@ namespace CapriDesktop
         // Back to the bottom-right corner for the next job.
         internal void ToCorner() { corner = null; }
 
+        // Where the next job's panel sits, by its bottom-left corner.
+        internal void Corner(Point bottomLeft) { corner = bottomLeft; }
+
         // The panel itself on screen, without the glow around it.
         internal Rectangle Plate
         {
@@ -1818,9 +2513,9 @@ namespace CapriDesktop
             {
                 float cw = Look.CharWidth(text), line = 19 * s, margin = 12 * s;
                 List<string> you = Look.Wrap("> you: " + System.Text.RegularExpressions.Regex.Replace(task ?? "", @"\s+", " ").Trim(), Columns);
-                if (you.Count > 2) { you.RemoveRange(2, you.Count - 2); you[1] = you[1].Substring(0, Math.Min(you[1].Length, Columns - 3)) + "..."; }
+                if (you.Count > 2) { you.RemoveRange(2, you.Count - 2); you[1] = Look.Cut(you[1], Columns - 3) + "..."; }
                 List<string> said = Look.Wrap(status, Columns);
-                if (said.Count > 3) { said.RemoveRange(3, said.Count - 3); said[2] = said[2].Substring(0, Math.Min(said[2].Length, Columns - 3)) + "..."; }
+                if (said.Count > 3) { said.RemoveRange(3, said.Count - 3); said[2] = Look.Cut(said[2], Columns - 3) + "..."; }
                 int hidden = steps.Count > MostRows ? steps.Count - (MostRows - 1) : 0;
                 List<string> rows = new List<string>();
                 List<Color> inks = new List<Color>();
@@ -1832,7 +2527,7 @@ namespace CapriDesktop
                 }
                 bool thinking = outcome == null && busy != null;
                 if (thinking) { rows.Add("> " + busy); inks.Add(Look.Neon); }
-                for (int i = 0; i < rows.Count; i++) if (rows[i].Length > Columns) rows[i] = rows[i].Substring(0, Columns - 3) + "...";
+                for (int i = 0; i < rows.Count; i++) if (Look.Cells(rows[i]) > Columns) rows[i] = Look.Cut(rows[i], Columns - 3) + "...";
                 bool running = outcome == null;
                 float panelWidth = 30 * s + Columns * cw;
                 float panelHeight = 12 * s + line * (you.Count + said.Count + rows.Count) + (rows.Count > 0 ? 6 * s : 0) + (running ? line : 0) + 8 * s;
@@ -1855,22 +2550,22 @@ namespace CapriDesktop
                     using (Pen edge = new Pen(Color.FromArgb(a, Look.Cyan), 2 * s)) graphics.DrawPath(edge, path);
                     float x = panel.Left + 15 * s, y = panel.Top + 12 * s;
                     using (Brush dim = new SolidBrush(Color.FromArgb(a, Look.Dim)))
-                        foreach (string row in you) { graphics.DrawString(row, heard, dim, x, y, StringFormat.GenericTypographic); y += line; }
+                        foreach (string row in you) { Look.Draw(graphics, row, heard, dim, x, y); y += line; }
                     using (Brush red = new SolidBrush(Color.FromArgb(a, Look.Red)))
                     using (Brush ink = new SolidBrush(Color.FromArgb(a, Look.Neon)))
                         for (int i = 0; i < said.Count; i++)
                         {
                             int name = i == 0 ? Math.Min(said[i].Length, Speaker.Length - 1) : 0;
                             if (name > 0) graphics.DrawString(said[i].Substring(0, name), bold, red, x, y, StringFormat.GenericTypographic);
-                            graphics.DrawString(said[i].Substring(name), text, ink, x + name * cw, y, StringFormat.GenericTypographic);
+                            Look.Draw(graphics, said[i].Substring(name), text, ink, x + name * cw, y);
                             y += line;
                         }
                     if (rows.Count > 0) y += 6 * s;
                     for (int i = 0; i < rows.Count; i++)
                     {
-                        using (Brush ink = new SolidBrush(Color.FromArgb(a, inks[i]))) graphics.DrawString(rows[i], text, ink, x, y, StringFormat.GenericTypographic);
+                        using (Brush ink = new SolidBrush(Color.FromArgb(a, inks[i]))) Look.Draw(graphics, rows[i], text, ink, x, y);
                         if (thinking && caret && i == rows.Count - 1)
-                            using (Brush block = new SolidBrush(Color.FromArgb(a, Look.Neon))) graphics.FillRectangle(block, x + rows[i].Length * cw + 2 * s, y + s, cw * 0.85f, line - 5 * s);
+                            using (Brush block = new SolidBrush(Color.FromArgb(a, Look.Neon))) graphics.FillRectangle(block, x + Look.Cells(rows[i]) * cw + 2 * s, y + s, cw * 0.85f, line - 5 * s);
                         y += line;
                     }
                     if (running)
@@ -1912,22 +2607,58 @@ namespace CapriDesktop
         private Point lastHead;
         private Point lastFeet;
         private Rectangle lastArea;
+        private int firstLine, visibleLines, totalLines;
+        private string scrollReply;
+        private RectangleF pages;
+        private bool copied;
+        internal Action<string> Copying = delegate(string reply) { Clipboard.SetText(reply); };
         private const int Columns = 34;
         private const string Speaker = "CAPRI: ";
 
         internal SpeechBox() : base("Capri says") { Cursor = Look.Pointer; }
 
         internal Rectangle PanelOnScreen { get { return panelOnScreen; } }
+        internal bool Scrollable { get { return totalLines > visibleLines; } }
+        internal int FirstLine { get { return firstLine; } }
+        internal int VisibleLines { get { return visibleLines; } }
+        internal int TotalLines { get { return totalLines; } }
+
+        internal void ScrollRows(int rows)
+        {
+            firstLine = (int)Math.Max(0, Math.Min((long)Math.Max(0, totalLines - visibleLines), (long)firstLine + rows));
+            clean = false;
+            if (Visible) Update(Math.Max(Opened + 1, 0), lastScale, lastHead, lastFeet, lastArea);
+        }
+
+        // Right click copies all she said, even the pages that aren't showing.
+        internal void CopyReply()
+        {
+            if (string.IsNullOrEmpty(Reply)) return;
+            try { Copying(Reply); }
+            catch (System.Runtime.InteropServices.ExternalException) { return; }
+            copied = true;
+            clean = false;
+            if (Visible) Update(Math.Max(Opened + 1, 0), lastScale, lastHead, lastFeet, lastArea);
+        }
+
+        protected override void OnMouseWheel(MouseEventArgs e)
+        {
+            base.OnMouseWheel(e);
+            if (e.Delta != 0) ScrollRows(e.Delta > 0 ? -3 : 3);
+        }
 
         protected override void OnMouseUp(MouseEventArgs e)
         {
             base.OnMouseUp(e);
-            if (e.Button == MouseButtons.Left && Dismissed != null) Dismissed();
+            if (e.Button == MouseButtons.Right) { CopyReply(); return; }
+            if (e.Button != MouseButtons.Left) return;
+            if (Scrollable && pages.Contains(e.Location)) { ScrollRows(e.X < pages.Left + pages.Width / 2 ? -visibleLines : visibleLines); return; }
+            if (Dismissed != null) Dismissed();
         }
 
         internal static int Fit(string text)
         {
-            int length = (text ?? "").Length;
+            int length = Look.Cells(text);
             return length > 420 ? 56 : length > 220 ? 44 : Columns;
         }
 
@@ -1966,8 +2697,10 @@ namespace CapriDesktop
             lastArea = area;
         }
 
-        private Bitmap Render(float s, Point head, Point feet, Rectangle area, bool cursorOn, out Point at)
+        internal Bitmap Render(float s, Point head, Point feet, Rectangle area, bool cursorOn, out Point at)
         {
+            if (scrollReply != Reply) { firstLine = 0; scrollReply = Reply; copied = false; }
+            s = Math.Min(s, Math.Min(area.Width / 160f, area.Height / 150f));
             string all = Speaker + (Reply ?? "") + (Heard ?? "");
             using (Font text = Look.Mono(14 * s, FontStyle.Regular, GraphicsUnit.Pixel, all))
             using (Font heard = Look.Mono(14 * s, FontStyle.Italic, GraphicsUnit.Pixel, all))
@@ -1978,19 +2711,26 @@ namespace CapriDesktop
                 float margin = 12 * s;
                 float top = 10 * s;
                 float tail = 16 * s;
-                int columns = Fit(Speaker + (Reply ?? ""));
+                int columns = Math.Max(1, Math.Min(Fit(Speaker + (Reply ?? "")), (int)Math.Floor((area.Width - 62 * s) / cw)));
                 List<string> lines = Look.Wrap(Speaker + (Reply ?? ""), columns);
+                // Her own remarks have no prompt, so nothing sits above her words.
+                int above = string.IsNullOrEmpty(Prompt) && !copied ? 0 : 1;
                 float panelWidth = 24 * s + columns * cw + 14 * s;
-                float panelHeight = 13 * s + line * (1 + lines.Count) + 10 * s;
+                totalLines = lines.Count;
+                int room = Math.Max(1, (int)Math.Floor((area.Height - 53 * s) / line) - above);
+                visibleLines = Math.Min(totalLines, totalLines > room ? Math.Max(1, room - 1) : room);
+                firstLine = Math.Max(0, Math.Min(firstLine, totalLines - visibleLines));
+                float panelHeight = 13 * s + line * (above + visibleLines + (Scrollable ? 1 : 0)) + 10 * s;
                 int width = (int)Math.Ceiling(panelWidth + margin * 2);
                 int height = (int)Math.Ceiling(top + panelHeight + tail + 4 * s);
                 bool below = head.Y - height < area.Top;
                 Point tip = below ? feet : head;
                 int left = Math.Max(area.Left, Math.Min(area.Right - width, (int)(tip.X - margin - panelWidth * 0.7f)));
-                int y = below ? tip.Y : tip.Y - height;
+                int y = Math.Max(area.Top, Math.Min(area.Bottom - height, below ? tip.Y : tip.Y - height));
                 at = new Point(left, y);
                 RectangleF panel = new RectangleF(margin, below ? tail + 4 * s : top, panelWidth, panelHeight);
                 panelOnScreen = new Rectangle(left + (int)panel.X, y + (int)panel.Y, (int)panel.Width, (int)panel.Height);
+                pages = Scrollable ? new RectangleF(panel.Left + 24 * s, panel.Bottom - 10 * s - line, panel.Width - 38 * s, line) : RectangleF.Empty;
                 float tipX = Math.Max(panel.Left + 32 * s, Math.Min(panel.Right - 10 * s, tip.X - left));
                 float tipY = below ? 0 : height - 1;
                 Bitmap image = new Bitmap(width, height, PixelFormat.Format32bppPArgb);
@@ -2010,27 +2750,45 @@ namespace CapriDesktop
                     using (Brush red = new SolidBrush(Look.Red)) graphics.FillRectangle(red, panel.Left + 10 * s, panel.Top + 13 * s, 3 * s, panel.Height - 26 * s);
                     float x = panel.Left + 24 * s;
                     float row2 = panel.Top + 12 * s;
-                    string you = Prompt + (Heard ?? "");
-                    if (you.Length > columns) you = you.Substring(0, columns - 3) + "...";
-                    using (Brush dim = new SolidBrush(Look.Dim)) graphics.DrawString(you, heard, dim, x, row2, StringFormat.GenericTypographic);
-                    row2 += line;
-                    int remaining = Speaker.Length + (State == TalkState.Thinking ? (Reply ?? "").Length : Math.Max(0, Revealed));
+                    if (above > 0)
+                    {
+                        string you = copied ? "> sys: copied" : Prompt + (Heard ?? "");
+                        if (Look.Cells(you) > columns) you = Look.Cut(you, columns - 3) + "...";
+                        using (Brush dim = new SolidBrush(Look.Dim)) Look.Draw(graphics, you, heard, dim, x, row2);
+                        row2 += line;
+                    }
+                    int[] takes = Look.Takes(lines, Speaker + (Reply ?? ""), Speaker.Length + (State == TalkState.Thinking ? (Reply ?? "").Length : Math.Max(0, Revealed)));
                     PointF caret = new PointF(x, row2);
                     using (Brush red = new SolidBrush(Look.Red))
                     using (Brush ink = new SolidBrush(Look.Neon))
                     {
-                        for (int i = 0; i < lines.Count && remaining > 0; i++)
+                        float right = x + columns * cw;
+                        for (int i = firstLine; i < firstLine + visibleLines && takes[i] > 0; i++)
                         {
-                            int take = Math.Min(lines[i].Length, remaining);
-                            string shown = lines[i].Substring(0, take);
-                            int name = i == 0 ? Math.Min(take, Speaker.Length - 1) : 0;
+                            string shown = lines[i].Substring(0, takes[i]);
+                            int name = i == 0 ? Math.Min(takes[i], Speaker.Length - 1) : 0;
                             if (name > 0) graphics.DrawString(shown.Substring(0, name), bold, red, x, row2, StringFormat.GenericTypographic);
-                            graphics.DrawString(shown.Substring(name), text, ink, x + name * cw, row2 + i * line, StringFormat.GenericTypographic);
-                            caret = new PointF(x + take * cw, row2 + i * line);
-                            remaining -= take + 1;
-                            if (remaining >= 0 && i + 1 < lines.Count) caret = new PointF(x, row2 + (i + 1) * line);
+                            string words = shown.Substring(name);
+                            float from = x + name * cw;
+                            // An Arabic, Urdu, Persian or Hebrew line grows leftwards from the right edge as she types it. The whole
+                            // line decides, so it doesn't flip sides partway through.
+                            if (Look.RightToLeft(lines[i].Substring(name)))
+                            {
+                                graphics.DrawString(words, text, ink, new RectangleF(from, row2 + (i - firstLine) * line, right - from, line), Look.Leftward);
+                                caret = new PointF(right - graphics.MeasureString(words, text, PointF.Empty, Look.Leftward).Width - cw - 2 * s, row2 + (i - firstLine) * line);
+                            }
+                            else
+                            {
+                                float end = Look.Draw(graphics, words, text, ink, from, row2 + (i - firstLine) * line);
+                                caret = new PointF(Look.Burmese(words) ? end : Look.Thai(words) || Look.Indic(words) ? from + graphics.MeasureString(words, text, PointF.Empty, Look.Spaced).Width : x + Look.Cells(shown) * cw, row2 + (i - firstLine) * line);
+                            }
                         }
-                        if (cursorOn) graphics.FillRectangle(ink, caret.X + s, caret.Y + s, cw * 0.85f, line - 5 * s);
+                        if (cursorOn && (firstLine + visibleLines == totalLines || takes[firstLine + visibleLines] == 0)) graphics.FillRectangle(ink, caret.X + s, caret.Y + s, cw * 0.85f, line - 5 * s);
+                    }
+                    if (Scrollable)
+                    {
+                        string paging = "< PREV   " + (firstLine + 1) + "-" + (firstLine + visibleLines) + "/" + totalLines + "   NEXT >";
+                        using (Brush dim = new SolidBrush(Look.Dim)) Look.Draw(graphics, paging, text, dim, pages.Left, pages.Top);
                     }
                 }
                 return image;
@@ -2075,14 +2833,20 @@ namespace CapriDesktop
         }
     }
 
+    // Her type box, in her Mainframe's look: a dark well cut at the corners with a red rim and hot red strokes over the two
+    // big corners, a red tick, YOU in rose and what they type in white. It opens where her speech box would.
     internal sealed class TypeBox : Form
     {
         internal event Action<string> Submitted;
+        internal event Action CallModeChanged;
         private readonly TextBox input;
         private readonly Label prompt;
+        private readonly Button callMode;
+        private readonly Label callNote;
+        private bool calling;
         private float scale = 1;
         private Font typed;
-        private Font italic;
+        private Font label;
 
         internal TypeBox()
         {
@@ -2092,17 +2856,21 @@ namespace CapriDesktop
             StartPosition = FormStartPosition.Manual;
             TopMost = true;
             AutoScaleMode = AutoScaleMode.None;
-            BackColor = Look.Panel;
+            BackColor = Neon.Well;
+            DoubleBuffered = true;
             prompt = new Label();
-            prompt.Text = "> you:";
-            prompt.ForeColor = Look.Dim;
-            prompt.BackColor = Look.Panel;
+            prompt.Text = "YOU";
+            prompt.ForeColor = Neon.Rose;
+            prompt.BackColor = Neon.Well;
             prompt.AutoSize = true;
+            prompt.UseMnemonic = false;
             input = new TextBox();
             input.BorderStyle = BorderStyle.None;
-            input.BackColor = Look.Panel;
-            input.ForeColor = Look.Ink;
+            input.BackColor = Neon.Well;
+            input.ForeColor = Neon.White;
             input.MaxLength = 240;
+            input.AccessibleName = Text;
+            input.HandleCreated += delegate { Native.SendMessage(input.Handle, 0x1501, new IntPtr(1), "Say something to Capri"); };
             input.KeyDown += delegate(object sender, KeyEventArgs key)
             {
                 if (key.KeyCode == Keys.Enter) { key.SuppressKeyPress = true; Submit(); }
@@ -2110,10 +2878,48 @@ namespace CapriDesktop
             };
             Controls.Add(prompt);
             Controls.Add(input);
+            callMode = new Button { FlatStyle = FlatStyle.Flat, BackColor = Neon.Well, ForeColor = Neon.Cyan, Text = "Call mode (beta): off", AccessibleName = "Call mode beta. Voice is conversation only when enabled", TabIndex = 1 };
+            callMode.FlatAppearance.BorderColor = Neon.Edge;
+            callMode.Click += delegate { if (CallModeChanged != null) CallModeChanged(); };
+            callNote = new Label { Text = CallSession.Reminder, ForeColor = Neon.White, BackColor = Neon.Well, UseMnemonic = false, Visible = false };
+            Controls.Add(callMode);
+            Controls.Add(callNote);
             Deactivate += delegate { Hide(); };
         }
 
         internal string Draft { get { return input.Text; } set { input.Text = value; } }
+
+        internal bool CallMode
+        {
+            get { return calling; }
+            set
+            {
+                calling = value;
+                callMode.Text = value ? "Call mode (beta): on" : "Call mode (beta): off";
+                callNote.Visible = value;
+                if (typed != null)
+                {
+                    Arrange();
+                    Rectangle area = Screen.FromControl(this).WorkingArea;
+                    Top = Math.Max(area.Top, Math.Min(Top, area.Bottom - Height));
+                }
+            }
+        }
+
+        private void Arrange()
+        {
+            float s = scale;
+            Height = (int)((calling ? 122 : 76) * s);
+            prompt.Location = new Point((int)(24 * s), ((int)(44 * s) - prompt.PreferredHeight) / 2);
+            input.Location = new Point(prompt.Right + (int)(10 * s), ((int)(44 * s) - input.PreferredHeight) / 2 + (int)s);
+            input.Width = Width - input.Left - (int)(16 * s);
+            callMode.SetBounds((int)(24 * s), (int)(44 * s), Width - (int)(48 * s), (int)(26 * s));
+            callNote.SetBounds((int)(24 * s), (int)(76 * s), Width - (int)(48 * s), (int)(38 * s));
+            callMode.Font = label;
+            callNote.Font = label;
+            Neon.Clip(this, 10 * s, 4 * s);
+            Invalidate();
+        }
 
         internal void Open(Point head, Point feet, Rectangle area, float s, Rectangle above)
         {
@@ -2121,24 +2927,21 @@ namespace CapriDesktop
             {
                 scale = s;
                 Font oldTyped = typed;
-                Font oldItalic = italic;
-                typed = Look.Mono(14 * s, FontStyle.Regular);
-                italic = Look.Mono(14 * s, FontStyle.Italic);
+                Font oldLabel = label;
+                typed = Neon.Type(15 * s, false, GraphicsUnit.Pixel);
+                label = Neon.Type(12.5f * s, true, GraphicsUnit.Pixel);
                 input.Font = typed;
-                prompt.Font = italic;
-                if (oldTyped != null) { oldTyped.Dispose(); oldItalic.Dispose(); }
+                prompt.Font = label;
+                if (oldTyped != null) { oldTyped.Dispose(); oldLabel.Dispose(); }
             }
             int width = (int)SpeechBox.PanelWidth(s);
-            int height = (int)(44 * s);
+            int height = (int)((calling ? 122 : 76) * s);
             bool below = head.Y - height - 20 * s < area.Top;
             int left = Math.Max(area.Left, Math.Min(area.Right - width, (int)(head.X - width * 0.7f)));
             int top = below ? feet.Y + (int)(8 * s) : head.Y - height - (int)(18 * s);
-            Bounds = new Rectangle(left, top, width, height);
+            Bounds = new Rectangle(left, Math.Max(area.Top, Math.Min(top, area.Bottom - height)), width, height);
+            Arrange();
             if (!above.IsEmpty) Follow(above, area);
-            prompt.Location = new Point((int)(24 * s), (height - prompt.PreferredHeight) / 2);
-            input.Location = new Point(prompt.Right + (int)(6 * s), (height - input.PreferredHeight) / 2 + (int)s);
-            input.Width = width - input.Left - (int)(14 * s);
-            using (GraphicsPath shape = Look.Plate(new RectangleF(0, 0, width, height), 10 * s, -1, height / 2f, 0, true)) Region = new Region(shape);
             Show();
             Activate();
             input.Focus();
@@ -2149,6 +2952,7 @@ namespace CapriDesktop
         {
             int top = above.Top - Height - (int)(16 * scale);
             if (top < area.Top) top = above.Bottom + (int)(8 * scale);
+            top = Math.Max(area.Top, Math.Min(top, area.Bottom - Height));
             Point target = new Point(above.Left, top);
             if (Location != target) Location = target;
         }
@@ -2167,11 +2971,8 @@ namespace CapriDesktop
         {
             base.OnPaint(e);
             float s = scale;
-            e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
-            using (GraphicsPath edge = Look.Plate(new RectangleF(s, s, Width - 2 * s - 1, Height - 2 * s - 1), 10 * s, -1, Height / 2f, 0, true))
-            using (Pen cyan = new Pen(Look.Cyan, 2 * s))
-                e.Graphics.DrawPath(cyan, edge);
-            using (Brush red = new SolidBrush(Look.Red)) e.Graphics.FillRectangle(red, 10 * s, 10 * s, 3 * s, Height - 20 * s);
+            Neon.Frame(e.Graphics, Size, s, 10 * s, 4 * s, 36 * s, 10 * s);
+            using (Brush tick = new SolidBrush(Neon.Hot)) e.Graphics.FillRectangle(tick, 12 * s, 12 * s, 2.5f * s, Height - 24 * s);
         }
     }
 }

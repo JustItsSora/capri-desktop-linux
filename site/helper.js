@@ -1,6 +1,8 @@
 (() => {
   const root = new URL('./', document.currentScript.src);
-  const live = 'https://lachydotmcg.github.io/capri-desktop/';
+  const live = 'https://capriai.app/';
+  // The helper's links before the site moved to capriai.app.
+  const before = 'https://lachydotmcg.github.io/capri-desktop/';
   const local = ['localhost', '127.0.0.1', '[::1]'].includes(location.hostname);
   const api = (local && new URLSearchParams(location.search).get('helpapi')) || 'https://capri-reactions.lachydotmcg.workers.dev/help';
   const still = matchMedia('(prefers-reduced-motion: reduce)');
@@ -85,7 +87,10 @@
   helper.append(panel, tab);
   document.body.append(helper);
 
-  const clips = { perch: [16, 8], perch_blink: [4, 8], perch_blink_glitch: [4, 8], perch_glitch: [10, 15] };
+  // Frames, frames a second, and for her artist's 60-frame perch, how many cells go across before the strip wraps to its next row.
+  const clips = { perch: [60, 30, 10], perch_blink: [8, 30], perch_blink_glitch: [8, 30], perch_glitch: [10, 15] };
+  const across = name => clips[name][2] || clips[name][0];
+  const down = name => Math.ceil(clips[name][0] / across(name));
   const loaded = new Set();
   for (const name in clips) {
     const image = new Image();
@@ -117,15 +122,17 @@
     }
     let name = clip;
     let cell = motion ? index % clips[clip][0] : 0;
-    if (name === 'perch' && blinkWith && loaded.has(blinkWith) && cell >= 9 && cell < 13) { name = blinkWith; cell -= 9; }
+    // A blink swaps in at cells 28 to 35 of the perch: her artist's own blink, its frames 29 to 36.
+    if (name === 'perch' && blinkWith && loaded.has(blinkWith) && cell >= 28 && cell < 36) { name = blinkWith; cell -= 28; }
     if (!loaded.has(name)) return;
     if (shown === name + ':' + cell) return;
+    const columns = across(name), rows = down(name);
     if (!shown.startsWith(name + ':')) {
       sprite.style.backgroundImage = 'url("' + new URL('assets/helper/' + name + '.webp', root).href + '")';
-      sprite.style.backgroundSize = clips[name][0] * 100 + '% 100%';
+      sprite.style.backgroundSize = columns * 100 + '% ' + rows * 100 + '%';
     }
     shown = name + ':' + cell;
-    sprite.style.backgroundPosition = cell / (clips[name][0] - 1) * 100 + '% 0';
+    sprite.style.backgroundPosition = (columns > 1 ? cell % columns / (columns - 1) * 100 : 0) + '% ' + (rows > 1 ? Math.floor(cell / columns) / (rows - 1) * 100 : 0) + '%';
   }, 1000 / 30);
 
   const sitOn = box => {
@@ -148,6 +155,7 @@
   const linked = href => {
     if (typeof href !== 'string') return null;
     if (href.startsWith(live)) return new URL(href.slice(live.length), root).href;
+    if (href.startsWith(before)) return new URL(href.slice(before.length), root).href;
     return /^https:\/\/discord\.gg\/[\w-]+$/.test(href) ? href : null;
   };
   const addLinks = (bubble, links) => {

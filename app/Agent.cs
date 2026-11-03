@@ -95,7 +95,7 @@ namespace CapriDesktop
     internal sealed class Agent : IDisposable
     {
         internal const double Pace = 15;
-        internal const int Version = 16;
+        internal const int Version = 33;
         private const string Patience = "\"turn\":{\"turn_timeout\":30,\"silence_end_call_timeout\":45}";
         internal event Action<int> Opened;
         internal event Action<string> Heard;
@@ -108,11 +108,13 @@ namespace CapriDesktop
         private ClientWebSocket socket;
         private Thread worker;
         private volatile bool ready;
+        private string lastHeard;
         internal Func<string, ToolArguments, string> Act;
 
-        internal static string Prompt { get { return Brain.Persona + Hands.Note + "\nYou are talking out loud in a live voice chat: keep every reply to one or two short spoken sentences, and never write tags in square brackets.\nIf the user goes quiet, they're busy, gaming or muted: stay quiet until they talk to you. Never check in, ask if they're still there, beg them to talk or say they left you hanging.\nSo the voice says your slang right, always spell choom as chewm, preem as preme and yezzirrr as yessirrr. Say chewm rarely, at most once every few replies and never on its own."; } }
+        // Her voice chat's prompt. With a brain that can't see, she's told she can't look at their screen, the same as in text chat.
+        internal static string Prompt { get { Brain keeper = Brain.Keeper; return Brain.Persona + Hands.NoteFor(Hands.KitFor(keeper != null && keeper.Blind)) + "\nYou are talking out loud in a live voice chat: keep every reply to one or two short spoken sentences, and never write tags in square brackets.\nIf the user goes quiet, they're busy, gaming or muted: stay quiet until they talk to you. Never check in, ask if they're still there, beg them to talk or say they left you hanging.\nSo the voice says your slang right, always spell choom as chewm, preem as preme and yezzirrr as yessirrr. Say chewm rarely, at most once every few replies and never on its own.\nWhen your hands are on a job it runs by itself, so keep talking with them like normal. Lines starting Capri's hands tell you how it's going: use them if they ask, and don't announce them otherwise. If they add to the job or change it, call use_computer once with their words and say so in a few words. Never say a job is done until you're told it finished."; } }
 
-        // ElevenLabs keeps its own copy of her prompt, so her agent is tuned again after an update or when personality.md changes.
+        // ElevenLabs keeps its own copy of her prompt, so her agent is tuned again after an update, or when it was tuned with an edited personality.md before 0.7.6.
         internal static bool Stale(int version, string personality) { return version < Version || (personality ?? "") != Brain.PersonalityStamp; }
 
         internal static string Create(string key, string voiceId)
@@ -123,9 +125,17 @@ namespace CapriDesktop
             return made.Id;
         }
 
+        // What her agent speaks with, for her lines off a call.
+        internal static AgentTts Speech(string key, string agentId)
+        {
+            string path = "/v1/convai/agents/" + Uri.EscapeDataString(agentId);
+            AgentShape shape = Voice.Reply<AgentShape>(Voice.Send(Voice.Open(path, key, "GET"), null), path);
+            return shape.Config == null ? null : shape.Config.Tts;
+        }
+
         internal static void Polyglot(string key, string agentId)
         {
-            Voice.Send(Voice.Open("/v1/convai/agents/" + Uri.EscapeDataString(agentId), key, "PATCH"), Encoding.UTF8.GetBytes("{\"conversation_config\":{\"tts\":{\"model_id\":\"eleven_flash_v2_5\"}},\"platform_settings\":{\"overrides\":{\"conversation_config_override\":{\"agent\":{\"prompt\":{\"prompt\":true},\"language\":true},\"tts\":{\"voice_id\":true}}}}}"));
+            Voice.Send(Voice.Open("/v1/convai/agents/" + Uri.EscapeDataString(agentId), key, "PATCH"), Encoding.UTF8.GetBytes("{\"conversation_config\":{\"tts\":{\"model_id\":" + Voice.Quote(Voice.CallModel) + "}},\"platform_settings\":{\"overrides\":{\"conversation_config_override\":{\"agent\":{\"prompt\":{\"prompt\":true},\"language\":true},\"tts\":{\"voice_id\":true}}}}}"));
         }
 
         internal string Language = "en";
@@ -207,7 +217,9 @@ namespace CapriDesktop
             byte[] bytes = Encoding.UTF8.GetBytes(text);
             lock (sending)
             {
-                try { socket.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text, true, stop.Token).Wait(); }
+                // A link that stops taking what she sends is dropped after a few seconds, so it can't hold up her window, which
+                // sends from its own thread. Dropping it ends the voice link the way a lost connection does.
+                try { if (!socket.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text, true, stop.Token).Wait(5000)) socket.Abort(); }
                 catch (Exception) { }
             }
         }
@@ -264,7 +276,7 @@ namespace CapriDesktop
                 Action<int> opened = Opened;
                 if (opened != null) opened(rate);
             }
-            else if (item.Type == "user_transcript" && item.Heard != null && !string.IsNullOrEmpty(item.Heard.Text)) { Action<string> heard = Heard; if (heard != null) heard(item.Heard.Text); }
+            else if (item.Type == "user_transcript" && item.Heard != null && !string.IsNullOrEmpty(item.Heard.Text)) { lastHeard = item.Heard.Text; Action<string> heard = Heard; if (heard != null) heard(item.Heard.Text); }
             else if (item.Type == "agent_response" && item.Reply != null && !string.IsNullOrEmpty(item.Reply.Text)) { Action<string> replied = Replied; if (replied != null) replied(Voice.Unsaid(item.Reply.Text)); }
             else if (item.Type == "audio" && item.Audio != null && item.Audio.Data != null)
             {
@@ -278,12 +290,44 @@ namespace CapriDesktop
             else if (item.Type == "client_tool_call" && item.Call != null && item.Call.Id != null)
             {
                 AgentToolCall call = item.Call;
+                if (call.Name == "app_window" && call.Arguments != null) call.Arguments.Asked = lastHeard ?? "";
                 Func<string, ToolArguments, string> act = Act;
                 ThreadPool.QueueUserWorkItem(delegate
                 {
                     string result = act == null ? "Her tools are off." : act(call.Name, call.Arguments);
                     Send("{\"type\":\"client_tool_result\",\"tool_call_id\":" + Voice.Quote(call.Id) + ",\"result\":" + Voice.Quote(result) + ",\"is_error\":false}");
                 });
+            }
+        }
+    }
+
+    [DataContract]
+    internal sealed class AgentShape
+    {
+        [DataMember(Name = "conversation_config")] public AgentConversation Config;
+    }
+
+    [DataContract]
+    internal sealed class AgentConversation
+    {
+        [DataMember(Name = "tts")] public AgentTts Tts;
+    }
+
+    [DataContract]
+    internal sealed class AgentTts
+    {
+        [DataMember(Name = "model_id")] public string Model;
+        [DataMember(Name = "stability")] public double? Stability;
+        [DataMember(Name = "similarity_boost")] public double? Similarity;
+        [DataMember(Name = "speed")] public double? Speed;
+
+        internal string Settings
+        {
+            get
+            {
+                if (Stability == null || Similarity == null) return null;
+                System.Globalization.CultureInfo plain = System.Globalization.CultureInfo.InvariantCulture;
+                return "{\"stability\":" + Stability.Value.ToString(plain) + ",\"similarity_boost\":" + Similarity.Value.ToString(plain) + (Speed == null ? "" : ",\"speed\":" + Speed.Value.ToString(plain)) + "}";
             }
         }
     }

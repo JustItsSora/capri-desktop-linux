@@ -134,7 +134,8 @@ namespace CapriDesktop
         private readonly string root;
         private readonly object gate = new object();
         private Process server;
-        private IntPtr job;
+        private static IntPtr job;
+        private static readonly object jobs = new object();
         private int port;
         private bool serverEyes;
         private bool serverCpu;
@@ -294,6 +295,14 @@ namespace CapriDesktop
             return info;
         }
 
+        internal static Func<ProcessStartInfo, Process> Spawn = Process.Start;
+
+        internal static int ExitCode(Process process)
+        {
+            try { return process.ExitCode; }
+            catch (InvalidOperationException) { return -1; }
+        }
+
         internal static void Lower(Process child)
         {
             try { child.PriorityClass = ProcessPriorityClass.BelowNormal; }
@@ -314,7 +323,7 @@ namespace CapriDesktop
                 serverEyes = eyes;
                 serverCpu = CpuOnly;
                 serverWindow = window;
-                server = Process.Start(StartInfo(pick, eyes, serverCpu, port, window));
+                server = Spawn(StartInfo(pick, eyes, serverCpu, port, window));
                 Lower(server);
                 Bind(server);
             }
@@ -322,19 +331,50 @@ namespace CapriDesktop
             while (waited.Elapsed.TotalSeconds < 180)
             {
                 Process running;
-                lock (gate) running = server;
-                if (running == null || running.HasExited) throw new BrainException("Brain crashed loading. Close games, press Refresh.");
-                try
+                bool onGpu;
+                lock (gate) { running = server; onGpu = !serverCpu; }
+                if (running == null || running.HasExited)
                 {
-                    HttpWebRequest request = (HttpWebRequest)WebRequest.Create(Address + "/health");
-                    request.Proxy = null;
-                    request.Timeout = 2000;
-                    using (HttpWebResponse response = (HttpWebResponse)request.GetResponse()) if (response.StatusCode == HttpStatusCode.OK) return;
+                    // Its own log is off, so the exit code is the only clue Copy error details can carry. A graphics driver that crashes it while loading gets one try on the CPU, as a crash mid-chat does.
+                    bool retry = running != null && onGpu;
+                    Brain.Log("brain", -1, "llama-server stopped while loading " + pick.Name + (onGpu ? "" : " on the CPU") + (running == null ? "" : " with exit code 0x" + ((uint)ExitCode(running)).ToString("X8")) + (retry ? ", restarting it on the CPU" : ""));
+                    if (!retry) throw new BrainException("Brain crashed loading. Close games, press Refresh.");
+                    CpuOnly = true;
+                    Ensure(pick);
+                    return;
                 }
-                catch (WebException) { }
+                if (Healthy()) return;
                 Thread.Sleep(400);
             }
             throw new BrainException("Brain loaded too slowly. Close games, press Refresh.");
+        }
+
+        private bool Healthy()
+        {
+            try
+            {
+                HttpWebRequest request = (HttpWebRequest)WebRequest.Create(Address + "/health");
+                request.Proxy = null;
+                request.Timeout = 2000;
+                using (HttpWebResponse response = (HttpWebResponse)request.GetResponse()) return response.StatusCode == HttpStatusCode.OK;
+            }
+            catch (WebException) { return false; }
+        }
+
+        // An ask that reaches her brain while it's still loading gets llama-server's 503 "Loading model": Ensure lets a second ask
+        // through once the server is started, like one sent while another ask restarts it with more memory. It waits for the load.
+        internal bool Settle()
+        {
+            Stopwatch waited = Stopwatch.StartNew();
+            while (waited.Elapsed.TotalSeconds < 180)
+            {
+                Process running;
+                lock (gate) running = server;
+                if (running == null || running.HasExited) return false;
+                if (Healthy()) return true;
+                Thread.Sleep(400);
+            }
+            return false;
         }
 
         internal static bool Lost(string problem) { return Regex.IsMatch(problem ?? "", @"ErrorDeviceLost|DEVICE_LOST|device lost|vk::", RegexOptions.IgnoreCase); }
@@ -350,7 +390,7 @@ namespace CapriDesktop
             }
         }
 
-        private static int FreePort()
+        internal static int FreePort()
         {
             TcpListener probe = new TcpListener(IPAddress.Loopback, 0);
             probe.Start();
@@ -393,18 +433,21 @@ namespace CapriDesktop
         [DllImport("kernel32.dll")] private static extern bool SetInformationJobObject(IntPtr job, int kind, ref ExtendedLimits limits, int size);
         [DllImport("kernel32.dll")] private static extern bool AssignProcessToJobObject(IntPtr job, IntPtr process);
 
-        private void Bind(Process child)
+        internal static void Bind(Process child)
         {
             try
             {
-                if (job == IntPtr.Zero)
+                lock (jobs)
                 {
-                    IntPtr created = CreateJobObject(IntPtr.Zero, null);
-                    ExtendedLimits limits = new ExtendedLimits();
-                    limits.Basic.Flags = 0x2000;
-                    if (created != IntPtr.Zero && SetInformationJobObject(created, 9, ref limits, Marshal.SizeOf(typeof(ExtendedLimits)))) job = created;
+                    if (job == IntPtr.Zero)
+                    {
+                        IntPtr created = CreateJobObject(IntPtr.Zero, null);
+                        ExtendedLimits limits = new ExtendedLimits();
+                        limits.Basic.Flags = 0x2000;
+                        if (created != IntPtr.Zero && SetInformationJobObject(created, 9, ref limits, Marshal.SizeOf(typeof(ExtendedLimits)))) job = created;
+                    }
+                    if (job != IntPtr.Zero) AssignProcessToJobObject(job, child.Handle);
                 }
-                if (job != IntPtr.Zero) AssignProcessToJobObject(job, child.Handle);
             }
             catch (InvalidOperationException) { }
             catch (System.ComponentModel.Win32Exception) { }

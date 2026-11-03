@@ -26,39 +26,7 @@ namespace CapriDesktop
                 return AppBuilder.Configure<ShelfApp>().UsePlatformDetect().StartWithClassicDesktopLifetime(args, ShutdownMode.OnExplicitShutdown);
             }
             if (args.Length >= 2 && args[0] == "--smoke") Smoke = Path.GetFullPath(args[1]);
-            if (args.Length >= 2 && args[0] == "--hands") return Hands(args[1], args.Length > 2 ? args[2] : null);
             return AppBuilder.Configure<CapriApp>().UsePlatformDetect().With(new MacOSPlatformOptions { ShowInDock = false }).StartWithClassicDesktopLifetime(args, ShutdownMode.OnExplicitShutdown);
-        }
-
-        // A way to give her a job from the terminal, to try her hands out.
-        private static int Hands(string task, string wanted)
-        {
-            string folder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Capri");
-            string key = null;
-            try { key = File.ReadAllText(Path.Combine(folder, "cloud-key")).Trim(); } catch (Exception) { }
-            string model = Pet.FastCloud;
-            try
-            {
-                using (FileStream stream = File.OpenRead(Path.Combine(folder, "cross.json")))
-                {
-                    Settings saved = (Settings)new System.Runtime.Serialization.Json.DataContractJsonSerializer(typeof(Settings)).ReadObject(stream);
-                    if (!string.IsNullOrEmpty(saved.CloudModel)) model = saved.CloudModel;
-                }
-            }
-            catch (Exception) { }
-            if (!string.IsNullOrEmpty(wanted)) model = wanted;
-            if (key != null && key.StartsWith("nvapi-", StringComparison.Ordinal))
-            {
-                Brain brain = new Brain();
-                brain.Remote = new Cloud(key, model);
-                brain.Model = model;
-                brain.CloudWait = 75000;
-                Limbs.Attach(brain);
-                Console.WriteLine(Linux.Work(task, task, brain));
-                return 0;
-            }
-            Console.WriteLine("Her NVIDIA key isn't in " + folder + ", so she can't look at your screen.");
-            return 1;
         }
     }
 
@@ -79,18 +47,22 @@ namespace CapriDesktop
                 NativeMenu menu = new NativeMenu();
                 NativeMenuItem talk = new NativeMenuItem("Talk to her");
                 talk.Click += delegate { pet.ComeBack(); pet.Talk.Open(); };
+                NativeMenuItem quiet = new NativeMenuItem("Quiet") { ToggleType = NativeMenuItemToggleType.CheckBox };
+                quiet.Click += delegate { pet.ToggleShush(); };
+                pet.ShushChanged = delegate { quiet.IsChecked = pet.Shushed; };
                 NativeMenuItem hide = new NativeMenuItem("Hide her");
                 hide.Click += delegate
                 {
                     if (pet.Away) pet.ComeBack();
                     else pet.HideAway();
-                    hide.Header = pet.Away ? "Show her" : "Hide her";
                 };
+                pet.AwayChanged = delegate { hide.Header = pet.Away ? "Show her" : "Hide her"; };
                 NativeMenuItem bring = new NativeMenuItem("Bring her back");
-                bring.Click += delegate { pet.Bring(); hide.Header = "Hide her"; };
+                bring.Click += delegate { pet.Bring(); };
                 NativeMenuItem quit = new NativeMenuItem("Quit Capri");
                 quit.Click += delegate { pet.Quit(); };
                 menu.Items.Add(talk);
+                menu.Items.Add(quiet);
                 menu.Items.Add(hide);
                 menu.Items.Add(bring);
                 menu.Items.Add(new NativeMenuItemSeparator());
