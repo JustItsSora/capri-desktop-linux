@@ -134,6 +134,7 @@ namespace CapriDesktop
         internal double Size = 240;
         internal double Breathe;
         internal double Tilt;
+        internal double Stretch;
         internal Point Centre;
 
         internal Rect Place(Clip shown)
@@ -147,7 +148,10 @@ namespace CapriDesktop
         {
             Clip shown = Shown;
             if (shown == null) return;
-            using (context.PushTransform(Matrix.CreateTranslation(-Centre.X, -Centre.Y) * Matrix.CreateRotation(Tilt * Math.PI / 180) * Matrix.CreateTranslation(Centre.X, Centre.Y + Breathe)))
+            using (context.PushTransform(Matrix.CreateTranslation(-Centre.X, -Centre.Y)
+                    * Matrix.CreateScale(1, Stretch)
+                    * Matrix.CreateRotation(Tilt * Math.PI / 180)
+                    * Matrix.CreateTranslation(Centre.X, Centre.Y + Breathe)))
             {
                 Rect place = Place(shown);
                 context.DrawImage(shown.Strip, new Rect(Cell * shown.Wide, 0, shown.Wide, shown.Strip.PixelSize.Height), place);
@@ -175,6 +179,8 @@ namespace CapriDesktop
         private static readonly string[] Lengths = { "Short", "Medium", "Long" };
         private static readonly int[] Recalls = { 8, 16, 32 };
         private static readonly string[] SoundNames = { "Off", "Quiet", "Normal", "Loud" };
+        private static readonly string[] SkinNames = { "Capri", "Watcher" };
+        private static readonly string[] SkinValues = { "capri", "watcher" };
         private static readonly int[] SoundLevels = { 0, 30, 60, 100 };
         internal const string Offline = "My brain's offline. Install Ollama from ollama.com and open it, then right-click me > Brain > Download " + Starter + ".";
         // The brain she downloads for herself through Ollama when it has none yet, so no terminal is needed.
@@ -197,28 +203,43 @@ namespace CapriDesktop
         internal Desk Desk = Desk.Make();
         internal Func<string, string> Think;
         internal Settings Saved;
+        internal string Skin = "capri";
         private readonly IClassicDesktopStyleApplicationLifetime desktop;
-        private readonly Clip idle = new Clip("idle", 16, 8, 1.11);
-        private readonly Clip blink = new Clip("blink", 4, 8, 1.11);
-        private readonly Clip blinkGlitch = new Clip("blink_glitch", 4, 8, 1.11);
-        private readonly Clip glitch = new Clip("glitch", 10, 15, 1.11);
-        private readonly Clip dangle = new Clip("dangle", 24, 10, 1.11);
-        private readonly Clip perch = new Clip("perch", 60, 30, 1, PerchShiftX, PerchShiftY);
+        private Clip idle = new Clip("idle", 16, 8, 1.11);
+        private Clip blink = new Clip("blink", 4, 8, 1.11);
+        private Clip blinkGlitch = new Clip("blink_glitch", 4, 8, 1.11);
+        private Clip glitch = new Clip("glitch", 10, 15, 1.11);
+        private Clip dangle = new Clip("dangle", 24, 10, 1.11);
+        private Clip perch = new Clip("perch", 60, 30, 1, PerchShiftX, PerchShiftY);
         // her artist's own blink, frames 29 to 36 of the blink set, and the same with a glitch around her eye.
-        private readonly Clip perchBlink = new Clip("perch_blink", 8, 30, 1, PerchShiftX, PerchShiftY);
-        private readonly Clip perchBlinkGlitch = new Clip("perch_blink_glitch", 8, 30, 1, PerchShiftX, PerchShiftY);
-        private readonly Clip perchGlitch = new Clip("perch_glitch", 10, 15, 1, PerchShiftX, PerchShiftY);
-        private readonly Clip mouth = new Clip("mouth", 5, 12, 1.11);
-        private readonly Clip walk = new Clip("walk", 12, 12, 1.11);
-        private readonly Clip dance = new Clip("dance", 16, 16, 1.11);
-        private readonly Clip perchDance = new Clip("perch_music", 60, 30, 1, PerchShiftX, PerchShiftY);
-        private readonly Clip arrive = new Clip("arrive", 14, 15, 1.11);
-        private readonly Clip leave = new Clip("leave", 12, 15, 1.11);
-        private readonly Clip perchArrive = new Clip("perch_arrive", 14, 15, 1, PerchShiftX, PerchShiftY);
-        private readonly Clip perchLeave = new Clip("perch_leave", 12, 15, 1, PerchShiftX, PerchShiftY);
-        private readonly Clip grin = new Clip("grin", 16, 8, 1.11);
-        private readonly Clip sleep = new Clip("sleep", 16, 6, 1.11);
-        private readonly Clip wake = new Clip("wake", 13, 15, 1.11);
+        private Clip perchBlink = new Clip("perch_blink", 8, 30, 1, PerchShiftX, PerchShiftY);
+        private Clip perchBlinkGlitch = new Clip("perch_blink_glitch", 8, 30, 1, PerchShiftX, PerchShiftY);
+        private Clip perchGlitch = new Clip("perch_glitch", 10, 15, 1, PerchShiftX, PerchShiftY);
+        private Clip mouth = new Clip("mouth", 5, 12, 1.11);
+        private Clip walk = new Clip("walk", 12, 12, 1.11);
+        private Clip dance = new Clip("dance", 16, 16, 1.11);
+        private Clip perchDance = new Clip("perch_music", 60, 30, 1, PerchShiftX, PerchShiftY);
+        private Clip arrive = new Clip("arrive", 14, 15, 1.11);
+        private Clip leave = new Clip("leave", 12, 15, 1.11);
+        private Clip perchArrive = new Clip("perch_arrive", 14, 15, 1, PerchShiftX, PerchShiftY);
+        private Clip perchLeave = new Clip("perch_leave", 12, 15, 1, PerchShiftX, PerchShiftY);
+        private Clip grin = new Clip("grin", 16, 8, 1.11);
+        private Clip sleep = new Clip("sleep", 16, 6, 1.11);
+        private Clip wake = new Clip("wake", 13, 15, 1.11);
+        // Watcher skin (alt look) - only the 13 animations that exist in the assets
+        private Clip watcherIdle = new Clip("watcher_idle", 16, 8, 1.11);
+        private Clip watcherBlink = new Clip("watcher_blink", 4, 8, 1.11);
+        private Clip watcherBlinkGlitch = new Clip("watcher_blink_glitch", 4, 8, 1.11);
+        private Clip watcherGlitch = new Clip("watcher_glitch", 10, 15, 1.11);
+        private Clip watcherDangle = new Clip("watcher_dangle", 24, 10, 1.11);
+        private Clip watcherPerch = new Clip("watcher_perch", 16, 30, 1, PerchShiftX, PerchShiftY);
+        private Clip watcherPerchBlink = new Clip("watcher_perch_blink", 8, 30, 1, PerchShiftX, PerchShiftY);
+        private Clip watcherPerchBlinkGlitch = new Clip("watcher_perch_blink_glitch", 8, 30, 1, PerchShiftX, PerchShiftY);
+        private Clip watcherPerchGlitch = new Clip("watcher_perch_glitch", 10, 15, 1, PerchShiftX, PerchShiftY);
+        private Clip watcherMouth = new Clip("watcher_mouth", 5, 12, 1.11);
+        private Clip watcherGrin = new Clip("watcher_grin", 16, 8, 1.11);
+        private Clip watcherSleep = new Clip("watcher_sleep", 16, 6, 1.11);
+        private Clip watcherWake = new Clip("watcher_wake", 13, 15, 1.11);
         internal static readonly string[] PetLines =
         {
             "Heh. Okay, I'll allow it.", "Pets logged. Morale up twelve percent.", "Careful, choom. I bite viruses.",
@@ -239,6 +260,7 @@ namespace CapriDesktop
         private readonly List<MenuItem> replyPicks = new List<MenuItem>();
         private readonly List<MenuItem> recallPicks = new List<MenuItem>();
         private readonly List<MenuItem> soundPicks = new List<MenuItem>();
+        private readonly List<MenuItem> skinPicks = new List<MenuItem>();
         private MenuItem danceItem;
         private MenuItem musicItem;
         private MenuItem introItem;
@@ -431,6 +453,7 @@ namespace CapriDesktop
         private Clip clip;
         private double clipStart;
         private int idleCycle;
+        private int stretchCycle;
         private Clip blinkWith;
         private double nextGlitch;
         private bool pressed;
@@ -598,7 +621,7 @@ namespace CapriDesktop
         internal double BodySize { get { return body.Size; } }
         internal Clip Showing { get { return clip; } }
         internal Clip PerchGlitch { get { return perchGlitch; } }
-        internal IList<Clip> Clips { get { return new[] { idle, blink, blinkGlitch, glitch, dangle, perch, perchBlink, perchBlinkGlitch, perchGlitch, mouth, walk, dance, perchDance, arrive, leave, perchArrive, perchLeave, grin, sleep, wake }; } }
+        internal IList<Clip> Clips { get { return new[] { idle, blink, blinkGlitch, glitch, dangle, perch, perchBlink, perchBlinkGlitch, perchGlitch, mouth, walk, dance, perchDance, arrive, leave, perchArrive, perchLeave, grin, sleep, wake, watcherIdle, watcherBlink, watcherBlinkGlitch, watcherGlitch, watcherDangle, watcherPerch, watcherPerchBlink, watcherPerchBlinkGlitch, watcherPerchGlitch, watcherMouth, watcherGrin, watcherSleep, watcherWake }; } }
         internal Clip Arrival { get { return arrive; } }
         internal Clip PerchArrival { get { return perchArrive; } }
         internal Clip SeatDance { get { return perchDance; } }
@@ -1009,6 +1032,16 @@ namespace CapriDesktop
             bool settled = !dragging && clip != dangle && clip != sleep;
             body.Breathe = settled ? Math.Sin(now * 1.75) * 2.2 : 0;
             body.Tilt = settled ? Math.Sin(now * 0.95) * 0.65 : 0;
+            if (settled && (clip == idle || clip == perch))
+            {
+                int cycle = index / clip.Count;
+                if (cycle != stretchCycle)
+                {
+                    stretchCycle = cycle;
+                    if (random.NextDouble() < 0.15) { body.Stretch = 1.03; DispatcherTimer.RunOnce(() => body.Stretch = 1.0, TimeSpan.FromSeconds(0.4)); }
+                }
+            }
+            else body.Stretch = 1.0;
             body.Shown = shown;
             body.Cell = cell;
             body.Talking = clip == idle && shown != blinkGlitch ? Talk.MouthCell(now) : -1;
@@ -1478,6 +1511,17 @@ namespace CapriDesktop
             typingItem = new MenuItem { Header = "Typing sound", ToggleType = MenuItemToggleType.CheckBox };
             typingItem.Click += delegate { SetTyping(!TypingSound); };
             sounds.Items.Add(typingItem);
+            MenuItem skin = new MenuItem { Header = "Skin" };
+            var skinPicks = new List<MenuItem>();
+            for (int i = 0; i < SkinValues.Length; i++)
+            {
+                int idx = i;
+                MenuItem pick = new MenuItem { Header = SkinNames[idx], ToggleType = MenuItemToggleType.Radio, GroupName = "skin" };
+                pick.Click += delegate { SetSkin(SkinValues[idx]); };
+                skinPicks.Add(pick);
+                skin.Items.Add(pick);
+            }
+            settings.Items.Add(skin);
             MenuItem notes = new MenuItem { Header = "Open her notes (me.md)" };
             notes.Click += delegate { OpenNotes(); };
             MenuItem personality = new MenuItem { Header = "Edit her personality (personality.md)" };
@@ -1728,6 +1772,7 @@ namespace CapriDesktop
             caughtUpItem.IsChecked = !Saved.NoCaughtUp;
             quietItem.IsChecked = shushed;
             for (int i = 0; i < sleepPicks.Count; i++) sleepPicks[i].IsChecked = Sleeps[i] == SleepAfter;
+            for (int i = 0; i < skinPicks.Count; i++) skinPicks[i].IsChecked = SkinValues[i] == Skin;
             sitItem.Header = SitChoice;
             hangItem.Header = HangChoice;
             screenItem.IsVisible = Screens.All.Count > 1;
@@ -2323,6 +2368,45 @@ namespace CapriDesktop
         {
             Saved.Wander = Math.Max(0, Math.Min(4, level));
             nextWander = -1;
+            Save();
+            Sync();
+        }
+
+        internal void SetSkin(string skin)
+        {
+            Skin = skin;
+            if (skin == "watcher")
+            {
+                idle = watcherIdle; blink = watcherBlink; blinkGlitch = watcherBlinkGlitch; glitch = watcherGlitch; dangle = watcherDangle;
+                perch = watcherPerch; perchBlink = watcherPerchBlink; perchBlinkGlitch = watcherPerchBlinkGlitch; perchGlitch = watcherPerchGlitch;
+                mouth = watcherMouth; grin = watcherGrin; sleep = watcherSleep; wake = watcherWake;
+                // Fall back to capri clips for animations not available in watcher skin
+            }
+            else
+            {
+                idle = new Clip("idle", 16, 8, 1.11);
+                blink = new Clip("blink", 4, 8, 1.11);
+                blinkGlitch = new Clip("blink_glitch", 4, 8, 1.11);
+                glitch = new Clip("glitch", 10, 15, 1.11);
+                dangle = new Clip("dangle", 24, 10, 1.11);
+                perch = new Clip("perch", 60, 30, 1, PerchShiftX, PerchShiftY);
+                perchBlink = new Clip("perch_blink", 8, 30, 1, PerchShiftX, PerchShiftY);
+                perchBlinkGlitch = new Clip("perch_blink_glitch", 8, 30, 1, PerchShiftX, PerchShiftY);
+                perchGlitch = new Clip("perch_glitch", 10, 15, 1, PerchShiftX, PerchShiftY);
+                mouth = new Clip("mouth", 5, 12, 1.11);
+                walk = new Clip("walk", 12, 12, 1.11);
+                dance = new Clip("dance", 16, 16, 1.11);
+                perchDance = new Clip("perch_music", 60, 30, 1, PerchShiftX, PerchShiftY);
+                arrive = new Clip("arrive", 14, 15, 1.11);
+                leave = new Clip("leave", 12, 15, 1.11);
+                perchArrive = new Clip("perch_arrive", 14, 15, 1, PerchShiftX, PerchShiftY);
+                perchLeave = new Clip("perch_leave", 12, 15, 1, PerchShiftX, PerchShiftY);
+                grin = new Clip("grin", 16, 8, 1.11);
+                sleep = new Clip("sleep", 16, 6, 1.11);
+                wake = new Clip("wake", 13, 15, 1.11);
+            }
+            if (clip == idle || clip == perch) Play(idle);
+            else if (clip == perch || clip == perchGlitch || clip == perchDance || clip == perchArrive || clip == perchLeave) Play(perch);
             Save();
             Sync();
         }

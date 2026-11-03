@@ -393,7 +393,7 @@ namespace CapriDesktop
             for (int step = 0; step < 12; step++)
             {
                 string plan;
-                try { plan = brain.Say(Pilot, Plan(task, done), 120); }
+                try { plan = brain.Quick(Pilot, Plan(task, done), 120); }
                 catch (BrainException error) { return error.Message; }
                 catch (WebException error) { return "My brain took too long: " + error.Message; }
                 catch (Exception error) { Console.Error.WriteLine("Capri hands: " + error); return "My hands got stuck: " + error.Message; }
@@ -490,10 +490,11 @@ namespace CapriDesktop
             Cloud remote = brain.Remote;
             string model = remote != null ? remote.Model : brain.Model;
             bool swapped = false;
+            const string SeeingCloud = "meta/llama-3.2-11b-vision-instruct";
             if (remote != null && !Sees(model))
             {
-                remote.Model = Pet.SeeingCloud;
-                brain.Model = Pet.SeeingCloud;
+                remote.Model = SeeingCloud;
+                brain.Model = SeeingCloud;
                 swapped = true;
             }
             try

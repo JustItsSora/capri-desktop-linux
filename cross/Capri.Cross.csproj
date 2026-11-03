@@ -30,6 +30,12 @@
     <Compile Include="../app/Voice.cs" Link="Shared/Voice.cs" />
     <Compile Include="../app/VoicePack.cs" Link="Shared/VoicePack.cs" />
     <EmbeddedResource Include="../assets/sprites/*.png" LogicalName="Capri.Sprite.%(Filename)%(Extension)" />
+    <EmbeddedResource Include="../assets/sprites/skins/capri/*.png" LogicalName="Capri.Sprite.capri_%(Filename)%(Extension)" />
+    <EmbeddedResource Include="../assets/sprites/skins/watcher/*.png" LogicalName="Capri.Sprite.watcher_%(Filename)%(Extension)" />
+    <EmbeddedResource Include="../assets/sprites/door/idle/*.png" LogicalName="Capri.Sprite.door_idle_%(Filename)%(Extension)" />
+    <EmbeddedResource Include="../assets/sprites/door/intro/*.png" LogicalName="Capri.Sprite.door_intro_%(Filename)%(Extension)" />
+    <EmbeddedResource Include="../assets/sprites/door/sfx/*.wav" LogicalName="Capri.Sprite.%(Filename)%(Extension)" />
+    <EmbeddedResource Include="../assets/sprites/splash/*.png" LogicalName="Capri.Sprite.splash_%(Filename)%(Extension)" />
     <EmbeddedResource Include="../assets/voice/*.wav" LogicalName="Capri.Voice.%(Filename)%(Extension)" />
     <EmbeddedResource Include="../assets/chip.png" LogicalName="Capri.Chip.png" />
     <AvaloniaResource Include="../assets/fonts/ShareTechMono-Regular.ttf" Link="Assets/ShareTechMono-Regular.ttf" />
